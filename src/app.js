@@ -45,8 +45,9 @@ app.use('/api/tasks/:taskId/comments', require('./modules/comments/comment.route
 app.use('/api/tasks/:taskId/files',    require('./modules/files/file.routes'));
 app.use('/api/comments', require('./modules/comments/comment.standalone.routes'));
 app.use('/api/files',    require('./modules/files/file.routes').standalone);
-// app.use('/api/notifications', require('./modules/notifications/notification.routes'));
-// app.use('/api/audit',         require('./modules/audit/audit.routes'));
+app.use('/api/notifications', require('./modules/notifications/notification.routes'));
+app.use('/api/audit',         require('./modules/audit/audit.routes'));
+app.use('/api/reports',       require('./modules/reports/report.routes'));
 
 // ─── 404 Handler ──────────────────────────────────────────────
 app.use((req, res) => {
