@@ -82,3 +82,32 @@ Server runs on: `http://localhost:5000`
 |             | mia@i2speed.com        |
 |             | noah@i2speed.com       |
 |             | olivia@i2speed.com     |
+
+
+# Name: TalentOps
+# Tagline: Optimize People. Maximize Performance.
+
+# How to Run
+
+# Backend
+cd backend
+npm install
+cp .env.example .env   # Fill in your MySQL credentials
+npm run setup          # Creates tables + seeds data
+npm run dev            # Start server on :5000
+
+# Frontend
+cd frontend
+npm install
+npm run dev            # Start on :5173
+
+
+
+Development Phases
+# Phase What's Included
+# Phase 1 : Database + AuthenticationMySQL schema (all tables), Login, JWT auth, Forgot password (email), Change password, Logout
+# Phase 2 : User ManagementAdmin/Manager/TL can add, edit, delete users, Hierarchy setup, Role-based access middleware, Profile management
+# Phase 3 : Task ManagementCreate & assign tasks, Task list views (per role), Update progress, Submit task, Approve / Reject workflow, Task detail page
+# Phase 4 : Comments & File Uploads Comments on tasks, File attachments (upload/download/delete), Multer backend setup
+# Phase 5 : Notifications & Audit LogsIn-app notifications (task updates, approvals), Mark as read, Audit log (who did what & when), Activity history view
+# Phase 6 : Dashboard, Reports & SearchRole-based dashboard with charts (Recharts), Task status overview, Performance tracking, Reports, Search & filters across tasks/users

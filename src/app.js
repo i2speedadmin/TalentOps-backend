@@ -41,9 +41,11 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', require('./modules/auth/auth.routes'));
 app.use('/api/users',         require('./modules/users/user.routes'));
 app.use('/api/tasks',         require('./modules/tasks/task.routes'));
-// app.use('/api/comments',      require('./modules/comments/comment.routes'));
+app.use('/api/tasks/:taskId/comments', require('./modules/comments/comment.routes'));
+app.use('/api/tasks/:taskId/files',    require('./modules/files/file.routes'));
+app.use('/api/comments', require('./modules/comments/comment.standalone.routes'));
+app.use('/api/files',    require('./modules/files/file.routes').standalone);
 // app.use('/api/notifications', require('./modules/notifications/notification.routes'));
-// app.use('/api/files',         require('./modules/files/file.routes'));
 // app.use('/api/audit',         require('./modules/audit/audit.routes'));
 
 // ─── 404 Handler ──────────────────────────────────────────────
