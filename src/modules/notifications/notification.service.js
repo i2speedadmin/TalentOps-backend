@@ -30,15 +30,17 @@ const getNotifications = async ({ userId, page = 1, limit = 20, unreadOnly = fal
     [userId]
   );
 
+  const totalCount  = parseInt(count[0].total)  || 0;
+  const unreadTotal = parseInt(unread[0].count) || 0;
   return {
     notifications: rows,
     pagination: {
-      total:      count[0].total,
+      total:      totalCount,
       page:       parseInt(page),
       limit:      parseInt(limit),
-      totalPages: Math.ceil(count[0].total / limit),
+      totalPages: Math.ceil(totalCount / limit),
     },
-    unreadCount: unread[0].count,
+    unreadCount: unreadTotal,
   };
 };
 
@@ -50,7 +52,7 @@ const getUnreadCount = async (userId) => {
     `SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND is_read = 0`,
     [userId]
   );
-  return rows[0].count;
+  return parseInt(rows[0].count) || 0;
 };
 
 // ============================================================
@@ -68,7 +70,7 @@ const markAsRead = async (notificationId, userId) => {
     [notificationId, userId]
   );
 
-  const unreadCount = await getUnreadCount(userId);
+  const unreadCount = parseInt(await getUnreadCount(userId)) || 0;
   return { unreadCount };
 };
 

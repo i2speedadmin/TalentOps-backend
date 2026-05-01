@@ -16,6 +16,13 @@ const pool = mysql.createPool({
   queueLimit:         0,
   timezone:           '+00:00',
   charset:            'utf8mb4',
+  // Cast BigInt COUNT(*) results to Number automatically
+  typeCast: (field, next) => {
+    if (field.type === 'LONGLONG' || field.type === 'LONG') {
+      return parseInt(field.string()) || 0;
+    }
+    return next();
+  },
 });
 
 // Test connection on startup

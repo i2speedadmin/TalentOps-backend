@@ -15,15 +15,15 @@ USE amcgrvfy_TalentOpsDev;
 INSERT INTO users (id, name, email, password, role, manager_id, status) VALUES
 
 -- Admin
-(1, 'System Admin',    'admin@i2speed.com',       '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin',       NULL, 'active'),
+(1, 'Admin I2Speed',    'admin@i2speed.com',       '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin',       NULL, 'active'),
 
 -- Managers (report to Admin)
-(2, 'Sarah Manager',   'sarah@i2speed.com',        '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'manager',     1,    'active'),
+(2, 'Chanikya Uppalapati',   'chanikya@i2speed.com',        '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'manager',     1,    'active'),
 (3, 'David Manager',   'david@i2speed.com',         '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'manager',     1,    'active'),
 
 -- Team Leaders (report to Managers)
-(4, 'Alice Leader',    'alice@i2speed.com',         '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'team_leader', 2,    'active'),
-(5, 'Bob Leader',      'bob@i2speed.com',            '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'team_leader', 2,    'active'),
+(4, 'Amrutha Nadiminti',    'amrutha@i2speed.com',         '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'team_leader', 2,    'active'),
+(5, 'Mihira Chowdary Uppalapati',      'mihira@i2speed.com',            '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'team_leader', 2,    'active'),
 (6, 'Carol Leader',    'carol@i2speed.com',          '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'team_leader', 3,    'active'),
 
 -- Recruiters (report to Team Leaders)
@@ -123,8 +123,8 @@ INSERT INTO notifications (user_id, title, message, type, ref_id, is_read) VALUE
 (7,  'Task Approved',         'Your task has been approved: LinkedIn sourcing campaign for Data Analyst','task_approved',  7,  1),
 (8,  'Task Approved',         'Your task has been approved: Candidate pipeline report - Q4',            'task_approved',  8,  1),
 (9,  'Task Rejected',         'Your task was rejected: Cold outreach to passive candidates',            'task_rejected',   9,  0),
-(7,  'New Comment',           'Alice Leader commented on: Source candidates for React Developer',       'comment_added',   1,  1),
-(9,  'New Comment',           'Bob Leader commented on: Schedule interviews for UI/UX Designer',        'comment_added',   3,  1);
+(7,  'New Comment',           'Amrutha Nadiminti commented on: Source candidates for React Developer',       'comment_added',   1,  1),
+(9,  'New Comment',           'Mihira Uppalapati commented on: Schedule interviews for UI/UX Designer',        'comment_added',   3,  1);
 
 
 -- ============================================================
@@ -132,7 +132,7 @@ INSERT INTO notifications (user_id, title, message, type, ref_id, is_read) VALUE
 -- ============================================================
 INSERT INTO audit_logs (user_id, action, target_table, target_id, old_value, new_value, ip_address) VALUES
 (1,  'CREATE_USER',    'users',  2,   NULL,
-     '{"name":"Sarah Manager","email":"sarah@i2speed.com","role":"manager"}',
+     '{"name":"Chanikya Uppalapati","email":"chanikya@i2speed.com","role":"manager"}',
      '127.0.0.1'),
 
 (1,  'CREATE_USER',    'users',  3,   NULL,
@@ -140,7 +140,7 @@ INSERT INTO audit_logs (user_id, action, target_table, target_id, old_value, new
      '127.0.0.1'),
 
 (2,  'CREATE_USER',    'users',  4,   NULL,
-     '{"name":"Alice Leader","email":"alice@i2speed.com","role":"team_leader"}',
+     '{"name":"Amrutha Nadiminti","email":"amrutha@i2speed.com","role":"team_leader"}',
      '127.0.0.1'),
 
 (4,  'CREATE_TASK',    'tasks',  1,   NULL,

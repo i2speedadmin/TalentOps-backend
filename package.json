@@ -8,7 +8,8 @@
     "dev":        "nodemon src/app.js",
     "schema":     "node src/config/schema.js",
     "seed":       "node src/config/seed.js",
-    "setup":      "node src/config/schema.js && node src/config/seed.js"
+    "setup":      "node src/config/schema.js && node src/config/seed.js",
+    "reset": "node src/config/reset.js && npm run setup"
   },
   "dependencies": {
     "bcryptjs":   "^2.4.3",

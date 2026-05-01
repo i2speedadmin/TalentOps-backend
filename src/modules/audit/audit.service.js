@@ -88,14 +88,18 @@ const getAuditLogs = async ({
   return {
     logs: rows.map((r) => ({
       ...r,
-      old_value: r.old_value ? JSON.parse(r.old_value) : null,
-      new_value: r.new_value ? JSON.parse(r.new_value) : null,
+      old_value: r.old_value
+        ? (typeof r.old_value === 'string' ? JSON.parse(r.old_value) : r.old_value)
+        : null,
+      new_value: r.new_value
+        ? (typeof r.new_value === 'string' ? JSON.parse(r.new_value) : r.new_value)
+        : null,
     })),
     pagination: {
-      total:      count[0].total,
+      total:      parseInt(count[0].total) || 0,
       page:       parseInt(page),
       limit:      parseInt(limit),
-      totalPages: Math.ceil(count[0].total / limit),
+      totalPages: Math.ceil((parseInt(count[0].total) || 0) / limit),
     },
   };
 };

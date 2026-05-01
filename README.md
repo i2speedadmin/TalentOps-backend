@@ -69,12 +69,10 @@ Server runs on: `http://localhost:5000`
 |-------------|------------------------|
 | Admin       | admin@i2speed.com      |
 |-------------|------------------------|
-| Manager     | sarah@i2speed.com      |
-|             | david@i2speed.com      |
+| Manager     | chanikya@i2speed.com   |
 |-------------|------------------------|
-| Team Leader | alice@i2speed.com      |
-|             | bob@i2speed.com        |
-|             | carol@i2speed.com      |
+| Team Leader | amrutha@i2speed.com    |
+|             | mihira@i2speed.com     |
 |-------------|------------------------|
 | Recruiter   | john@i2speed.com       |
 |             | emma@i2speed.com       |

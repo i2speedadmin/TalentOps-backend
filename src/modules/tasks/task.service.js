@@ -121,16 +121,17 @@ const getAllTasks = async ({ requester, page = 1, limit = 10, search, status, pr
   );
   const [count] = await db.query(
     `SELECT COUNT(*) AS total ${TASK_JOIN} ${whereClause}`,
-    params
+    [...params]
   );
 
+  const totalCount = parseInt(count[0].total) || 0;
   return {
     tasks: rows,
     pagination: {
-      total:      count[0].total,
+      total:      totalCount,
       page:       parseInt(page),
       limit:      parseInt(limit),
-      totalPages: Math.ceil(count[0].total / limit),
+      totalPages: Math.ceil(totalCount / limit),
     },
   };
 };
@@ -469,15 +470,18 @@ const getTaskStats = async (requester) => {
   const scope = await buildScope(requester);
 
   const [rows] = await db.query(
-    `SELECT status, COUNT(*) AS count ${TASK_JOIN} ${scope.where}
-     GROUP BY status`,
+    `SELECT t.status, COUNT(*) AS count ${TASK_JOIN} ${scope.where}
+     GROUP BY t.status`,
     scope.params
   );
 
   const stats = { assigned: 0, in_progress: 0, submitted: 0, approved: 0, rejected: 0, total: 0 };
   rows.forEach((r) => {
-    stats[r.status] = r.count;
-    stats.total    += r.count;
+    const cnt = parseInt(r.count) || 0;
+    if (Object.prototype.hasOwnProperty.call(stats, r.status)) {
+      stats[r.status] = cnt;
+    }
+    stats.total += cnt;
   });
   return stats;
 };

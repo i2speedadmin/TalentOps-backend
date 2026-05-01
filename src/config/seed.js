@@ -41,13 +41,13 @@ const seed = async () => {
     // --------------------------------------------------------
     const users = [
       // Admin
-      { id: 1,  name: 'System Admin',      email: 'admin@i2speed.com',   role: 'admin',       manager_id: null, status: 'active' },
+      { id: 1,  name: 'Admin I2Speed',      email: 'admin@i2speed.com',   role: 'admin',       manager_id: null, status: 'active' },
       // Managers
-      { id: 2,  name: 'Sarah Manager',     email: 'sarah@i2speed.com',   role: 'manager',     manager_id: 1,    status: 'active' },
+      { id: 2,  name: 'Chanikya Uppalapati',     email: 'chanikya@i2speed.com',   role: 'manager',     manager_id: 1,    status: 'active' },
       { id: 3,  name: 'David Manager',     email: 'david@i2speed.com',   role: 'manager',     manager_id: 1,    status: 'active' },
       // Team Leaders
-      { id: 4,  name: 'Alice Leader',      email: 'alice@i2speed.com',   role: 'team_leader', manager_id: 2,    status: 'active' },
-      { id: 5,  name: 'Bob Leader',        email: 'bob@i2speed.com',     role: 'team_leader', manager_id: 2,    status: 'active' },
+      { id: 4,  name: 'Amrutha Nadiminti',      email: 'amrutha@i2speed.com',   role: 'team_leader', manager_id: 2,    status: 'active' },
+      { id: 5,  name: 'Mihira Chowdary Uppalapati',        email: 'mihira@i2speed.com',     role: 'team_leader', manager_id: 2,    status: 'active' },
       { id: 6,  name: 'Carol Leader',      email: 'carol@i2speed.com',   role: 'team_leader', manager_id: 3,    status: 'active' },
       // Recruiters
       { id: 7,  name: 'John Recruiter',    email: 'john@i2speed.com',    role: 'recruiter',   manager_id: 4,    status: 'active' },
@@ -207,8 +207,8 @@ const seed = async () => {
       { user_id: 7,  title: 'Task Approved',      message: 'Your task has been approved: LinkedIn sourcing campaign for Data Analyst', type: 'task_approved',  ref_id: 7,  is_read: 1 },
       { user_id: 8,  title: 'Task Approved',      message: 'Your task has been approved: Candidate pipeline report - Q4',             type: 'task_approved',  ref_id: 8,  is_read: 1 },
       { user_id: 9,  title: 'Task Rejected',      message: 'Your task was rejected: Cold outreach to passive candidates',             type: 'task_rejected',   ref_id: 9,  is_read: 0 },
-      { user_id: 7,  title: 'New Comment',        message: 'Alice Leader commented on: Source candidates for React Developer',        type: 'comment_added',   ref_id: 1,  is_read: 1 },
-      { user_id: 9,  title: 'New Comment',        message: 'Bob Leader commented on: Schedule interviews for UI/UX Designer',         type: 'comment_added',   ref_id: 3,  is_read: 1 },
+      { user_id: 7,  title: 'New Comment',        message: 'Amrutha Nadiminti commented on: Source candidates for React Developer',        type: 'comment_added',   ref_id: 1,  is_read: 1 },
+      { user_id: 9,  title: 'New Comment',        message: 'Mihira Uppalapati commented on: Schedule interviews for UI/UX Designer',         type: 'comment_added',   ref_id: 3,  is_read: 1 },
     ];
 
     for (const n of notifications) {
@@ -224,9 +224,9 @@ const seed = async () => {
     // SEED: audit_logs
     // --------------------------------------------------------
     const logs = [
-      { user_id: 1, action: 'CREATE_USER',  target_table: 'users', target_id: 2,  old_value: null, new_value: { name: 'Sarah Manager', email: 'sarah@i2speed.com', role: 'manager' },       ip: '127.0.0.1' },
+      { user_id: 1, action: 'CREATE_USER',  target_table: 'users', target_id: 2,  old_value: null, new_value: { name: 'Chanikya Uppalapati', email: 'chanikya@i2speed.com', role: 'manager' },       ip: '127.0.0.1' },
       { user_id: 1, action: 'CREATE_USER',  target_table: 'users', target_id: 3,  old_value: null, new_value: { name: 'David Manager', email: 'david@i2speed.com', role: 'manager' },       ip: '127.0.0.1' },
-      { user_id: 2, action: 'CREATE_USER',  target_table: 'users', target_id: 4,  old_value: null, new_value: { name: 'Alice Leader',  email: 'alice@i2speed.com', role: 'team_leader' },   ip: '127.0.0.1' },
+      { user_id: 2, action: 'CREATE_USER',  target_table: 'users', target_id: 4,  old_value: null, new_value: { name: 'Amrutha Leader',  email: 'amrutha@i2speed.com', role: 'team_leader' },   ip: '127.0.0.1' },
       { user_id: 4, action: 'CREATE_TASK',  target_table: 'tasks', target_id: 1,  old_value: null, new_value: { title: 'Source candidates for React Developer',    assigned_to: 7, status: 'assigned' }, ip: '127.0.0.1' },
       { user_id: 4, action: 'CREATE_TASK',  target_table: 'tasks', target_id: 2,  old_value: null, new_value: { title: 'Post job description for Node.js Engineer', assigned_to: 8, status: 'assigned' }, ip: '127.0.0.1' },
       { user_id: 7, action: 'UPDATE_TASK',  target_table: 'tasks', target_id: 3,  old_value: { status: 'assigned' },   new_value: { status: 'in_progress' }, ip: '127.0.0.1' },
@@ -257,8 +257,8 @@ const seed = async () => {
     console.log('📋 Login Credentials (Password: Password@123)');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('👑 Admin        : admin@i2speed.com');
-    console.log('🧑‍💼 Manager      : sarah@i2speed.com / david@i2speed.com');
-    console.log('🧑‍🏫 Team Leader  : alice@i2speed.com / bob@i2speed.com / carol@i2speed.com');
+    console.log('🧑‍💼 Manager      : chanikya@i2speed.com');
+    console.log('🧑‍🏫 Team Leader  : amrutha@i2speed.com / mihira@i2speed.com');
     console.log('👨‍💻 Recruiter    : john@i2speed.com/ emma@i2speed.com/ liam@i2speed.com/ mia@i2speed.com/ noah@i2speed.com/ olivia@i2speed.com');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 

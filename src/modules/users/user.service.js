@@ -100,13 +100,14 @@ const getAllUsers = async ({ requester, page = 1, limit = 20, search, role, stat
     countParams
   );
 
+  const totalCount = parseInt(count[0].total) || 0;
   return {
     users: rows,
     pagination: {
-      total:       count[0].total,
+      total:       totalCount,
       page:        parseInt(page),
       limit:       parseInt(limit),
-      totalPages:  Math.ceil(count[0].total / limit),
+      totalPages:  Math.ceil(totalCount / limit),
     },
   };
 };

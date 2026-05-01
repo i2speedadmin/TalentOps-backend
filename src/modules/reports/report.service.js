@@ -93,11 +93,11 @@ const getOverviewStats = async ({ requester, dateFrom, dateTo }) => {
   const [userCountRow] = await db.query(userCountQ);
 
   const statusMap = { assigned: 0, in_progress: 0, submitted: 0, approved: 0, rejected: 0 };
-  statusRows.forEach((r) => { statusMap[r.status] = parseInt(r.count); });
-  const total = Object.values(statusMap).reduce((a, b) => a + b, 0);
+  statusRows.forEach((r) => { statusMap[r.status] = parseInt(r.count) || 0; });
+  const total = Object.values(statusMap).reduce((a, b) => a + (parseInt(b) || 0), 0);
 
   const priorityMap = { low: 0, medium: 0, high: 0, urgent: 0 };
-  priorityRows.forEach((r) => { priorityMap[r.priority] = parseInt(r.count); });
+  priorityRows.forEach((r) => { priorityMap[r.priority] = parseInt(r.count) || 0; });
 
   return {
     tasks: { ...statusMap, total, overdue: parseInt(overdueRows[0]?.count || 0) },
@@ -183,18 +183,22 @@ const getTeamPerformance = async ({ requester, dateFrom, dateTo }) => {
     params
   );
 
-  return rows.map((r) => ({
-    ...r,
-    total:               parseInt(r.total    || 0),
-    approved:            parseInt(r.approved || 0),
-    submitted:           parseInt(r.submitted || 0),
-    in_progress:         parseInt(r.in_progress || 0),
-    rejected:            parseInt(r.rejected || 0),
-    assigned:            parseInt(r.assigned || 0),
-    overdue:             parseInt(r.overdue  || 0),
-    completionRate:      r.total > 0 ? Math.round((r.approved / r.total) * 100) : 0,
-    avg_completion_hours: r.avg_completion_hours ? Math.round(r.avg_completion_hours) : null,
-  }));
+  return rows.map((r) => {
+    const tot      = parseInt(r.total    || 0);
+    const approved = parseInt(r.approved || 0);
+    return {
+      ...r,
+      total:               tot,
+      approved:            approved,
+      submitted:           parseInt(r.submitted    || 0),
+      in_progress:         parseInt(r.in_progress  || 0),
+      rejected:            parseInt(r.rejected      || 0),
+      assigned:            parseInt(r.assigned      || 0),
+      overdue:             parseInt(r.overdue        || 0),
+      completionRate:      tot > 0 ? Math.round((approved / tot) * 100) : 0,
+      avg_completion_hours: r.avg_completion_hours ? Math.round(parseFloat(r.avg_completion_hours)) : null,
+    };
+  });
 };
 
 // ============================================================
@@ -221,7 +225,7 @@ const getPriorityBreakdown = async ({ requester, dateFrom, dateTo }) => {
   return Object.entries(result).map(([priority, statuses]) => ({
     priority,
     ...statuses,
-    total: Object.values(statuses).reduce((a, b) => a + parseInt(b), 0),
+    total: Object.values(statuses).reduce((a, b) => a + (parseInt(b) || 0), 0),
   }));
 };
 
