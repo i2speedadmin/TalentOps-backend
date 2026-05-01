@@ -9,7 +9,8 @@ const authenticate = require('../../middleware/auth');
 
 // Public routes
 router.post('/login',           controller.login);
-router.post('/forgot-password', controller.forgotPassword);
+router.post('/forgot-password',        controller.forgotPassword);
+router.post('/resend-forgot-password', controller.resendForgotPassword);
 router.post('/reset-password',  controller.resetPassword);
 
 // Protected routes (require valid JWT)

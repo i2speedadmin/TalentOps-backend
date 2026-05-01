@@ -49,20 +49,19 @@ const buildScopeWhere = (requester) => {
     case 'admin':
       return { where: '', params: [] };
     case 'manager':
-      // Users managed by this manager or under TLs they manage
       return {
-        where: `WHERE (u.manager_id = ? OR u.manager_id IN (
-                  SELECT id FROM users WHERE manager_id = ? AND role = 'team_leader'
+        where: `WHERE u.tenant_id = ? AND (u.manager_id = ? OR u.manager_id IN (
+                  SELECT id FROM users WHERE manager_id = ? AND role = 'team_leader' AND tenant_id = ?
                 ))`,
-        params: [requester.id, requester.id],
+        params: [requester.tenant_id, requester.id, requester.id, requester.tenant_id],
       };
     case 'team_leader':
       return {
-        where:  'WHERE u.manager_id = ?',
-        params: [requester.id],
+        where:  'WHERE u.tenant_id = ? AND u.manager_id = ?',
+        params: [requester.tenant_id, requester.id],
       };
     default:
-      return { where: 'WHERE u.id = ?', params: [requester.id] };
+      return { where: 'WHERE u.tenant_id = ? AND u.id = ?', params: [requester.tenant_id, requester.id] };
   }
 };
 

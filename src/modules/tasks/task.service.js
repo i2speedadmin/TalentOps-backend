@@ -46,47 +46,49 @@ const TASK_JOIN = `
   LEFT JOIN users u2 ON u2.id = t.assigned_by
 `;
 
-// ─── Build scope WHERE based on requester role ────────────────
+// ─── Build scope WHERE based on requester role (with tenant_id) ─
 const buildScope = async (requester) => {
+  const tenantId = requester.tenant_id;
+
   switch (requester.role) {
     case 'admin':
-      return { where: '', params: [] };
+      return { where: 'WHERE t.tenant_id = ?', params: [tenantId] };
 
     case 'manager': {
-      // Tasks assigned by self OR by TLs under this manager OR to recruiters under TLs
       const [tls] = await db.query(
-        `SELECT id FROM users WHERE manager_id = ? AND role = 'team_leader'`,
-        [requester.id]
+        `SELECT id FROM users WHERE manager_id = ? AND role = 'team_leader' AND tenant_id = ?`,
+        [requester.id, tenantId]
       );
       const tlIds = tls.map((r) => r.id);
       const [recs] = await db.query(
-        `SELECT id FROM users WHERE manager_id IN (${tlIds.length ? tlIds.join(',') : 0}) AND role = 'recruiter'`
+        `SELECT id FROM users WHERE manager_id IN (${tlIds.length ? tlIds.join(',') : 0}) AND role = 'recruiter' AND tenant_id = ?`,
+        [tenantId]
       );
       const recIds = recs.map((r) => r.id);
       const allIds = [requester.id, ...tlIds, ...recIds];
       return {
-        where:  `WHERE (t.assigned_by IN (${allIds.join(',')}) OR t.assigned_to IN (${allIds.join(',')}))`,
-        params: [],
+        where:  `WHERE t.tenant_id = ? AND (t.assigned_by IN (${allIds.join(',')}) OR t.assigned_to IN (${allIds.join(',')}))`,
+        params: [tenantId],
       };
     }
 
     case 'team_leader': {
       const [recs] = await db.query(
-        `SELECT id FROM users WHERE manager_id = ? AND role = 'recruiter'`,
-        [requester.id]
+        `SELECT id FROM users WHERE manager_id = ? AND role = 'recruiter' AND tenant_id = ?`,
+        [requester.id, tenantId]
       );
       const recIds = recs.map((r) => r.id);
       const allIds = [requester.id, ...recIds];
       return {
-        where:  `WHERE (t.assigned_by = ? OR t.assigned_to IN (${allIds.join(',')}))`,
-        params: [requester.id],
+        where:  `WHERE t.tenant_id = ? AND (t.assigned_by = ? OR t.assigned_to IN (${allIds.join(',')}))`,
+        params: [tenantId, requester.id],
       };
     }
 
     default: // recruiter
       return {
-        where:  'WHERE t.assigned_to = ?',
-        params: [requester.id],
+        where:  'WHERE t.tenant_id = ? AND t.assigned_to = ?',
+        params: [tenantId, requester.id],
       };
   }
 };

@@ -11,7 +11,7 @@ const db       = require('../../config/db');
 // ─── Generate JWT ────────────────────────────────────────────
 const generateToken = (user) => {
   return jwt.sign(
-    { id: user.id, role: user.role, email: user.email },
+    { id: user.id, role: user.role, email: user.email, tenant_id: user.tenant_id },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
@@ -34,7 +34,7 @@ const createTransporter = () => {
 const login = async ({ email, password, ip, userAgent }) => {
   // 1. Find user
   const [rows] = await db.query(
-    `SELECT id, name, email, password, role, manager_id, profile_pic, status
+    `SELECT id, tenant_id, name, email, password, role, manager_id, profile_pic, status
      FROM users WHERE email = ? LIMIT 1`,
     [email.trim().toLowerCase()]
   );
@@ -75,7 +75,7 @@ const login = async ({ email, password, ip, userAgent }) => {
 // ─── Get Me ──────────────────────────────────────────────────
 const getMe = async (userId) => {
   const [rows] = await db.query(
-    `SELECT u.id, u.name, u.email, u.role, u.manager_id, u.profile_pic, u.status, u.created_at,
+    `SELECT u.id, u.tenant_id, u.name, u.email, u.role, u.manager_id, u.profile_pic, u.status, u.created_at,
             m.name AS manager_name
      FROM users u
      LEFT JOIN users m ON m.id = u.manager_id
@@ -227,4 +227,10 @@ const resetPassword = async ({ token, newPassword, ip, userAgent }) => {
   return { message: 'Password reset successfully. You can now login.' };
 };
 
-module.exports = { login, getMe, changePassword, forgotPassword, resetPassword };
+// ─── Resend Password Reset Email ─────────────────────────────
+const resendForgotPassword = async ({ email, ip, userAgent }) => {
+  // Same as forgotPassword — just re-trigger it
+  return forgotPassword({ email, ip, userAgent });
+};
+
+module.exports = { login, getMe, changePassword, forgotPassword, resetPassword, resendForgotPassword };

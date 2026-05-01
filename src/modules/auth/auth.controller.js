@@ -121,4 +121,16 @@ const resetPassword = async (req, res) => {
   }
 };
 
-module.exports = { login, getMe, logout, changePassword, forgotPassword, resetPassword };
+// ─── POST /api/auth/resend-forgot-password ───────────────────
+const resendForgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: 'Email is required.' });
+    const result = await authService.resendForgotPassword({ email, ip: req.ip, userAgent: req.headers['user-agent'] });
+    res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    res.status(err.status || 500).json({ success: false, message: err.message || 'Server error.' });
+  }
+};
+
+module.exports = { login, getMe, logout, changePassword, forgotPassword, resetPassword, resendForgotPassword };

@@ -10,6 +10,7 @@ const getNotifications = async (req, res) => {
     const { page, limit, unreadOnly } = req.query;
     const result = await notifService.getNotifications({
       userId:     req.user.id,
+      tenantId:   req.user.tenant_id,
       page,
       limit,
       unreadOnly: unreadOnly === 'true',
@@ -23,7 +24,7 @@ const getNotifications = async (req, res) => {
 // GET /api/notifications/unread-count
 const getUnreadCount = async (req, res) => {
   try {
-    const count = await notifService.getUnreadCount(req.user.id);
+    const count = await notifService.getUnreadCount(req.user.id, req.user.tenant_id);
     res.json({ success: true, unreadCount: count });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -33,7 +34,7 @@ const getUnreadCount = async (req, res) => {
 // PATCH /api/notifications/:id/read
 const markAsRead = async (req, res) => {
   try {
-    const result = await notifService.markAsRead(req.params.id, req.user.id);
+    const result = await notifService.markAsRead(req.params.id, req.user.id, req.user.tenant_id);
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(err.status || 500).json({ success: false, message: err.message });
@@ -43,7 +44,7 @@ const markAsRead = async (req, res) => {
 // PATCH /api/notifications/mark-all-read
 const markAllAsRead = async (req, res) => {
   try {
-    const result = await notifService.markAllAsRead(req.user.id);
+    const result = await notifService.markAllAsRead(req.user.id, req.user.tenant_id);
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -63,7 +64,7 @@ const deleteNotification = async (req, res) => {
 // DELETE /api/notifications/clear-read
 const clearReadNotifications = async (req, res) => {
   try {
-    const result = await notifService.clearReadNotifications(req.user.id);
+    const result = await notifService.clearReadNotifications(req.user.id, req.user.tenant_id);
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

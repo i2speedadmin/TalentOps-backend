@@ -1,57 +1,72 @@
 // ============================================================
 // src/modules/reports/report.service.js
+// Fixed: tenant_id scoping on all queries
 // ============================================================
 
 const db = require('../../config/db');
 
 const ROLE_LEVEL = { admin: 4, manager: 3, team_leader: 2, recruiter: 1 };
 
-// ─── Build team scope WHERE for a requester ───────────────────
+// ─── Build team scope — returns userIds within tenant ─────────
 const buildTeamScope = async (requester) => {
-  if (requester.role === 'admin') return { userIds: null }; // all users
+  const tenantId = requester.tenant_id;
+
+  // Admin sees all users in their tenant
+  if (requester.role === 'admin') return { userIds: null, tenantId };
 
   let userIds = [requester.id];
 
   if (requester.role === 'manager') {
     const [tls] = await db.query(
-      `SELECT id FROM users WHERE manager_id = ? AND role = 'team_leader'`,
-      [requester.id]
+      `SELECT id FROM users WHERE manager_id = ? AND role = 'team_leader' AND tenant_id = ?`,
+      [requester.id, tenantId]
     );
     const tlIds = tls.map((r) => r.id);
     if (tlIds.length) {
       const [recs] = await db.query(
-        `SELECT id FROM users WHERE manager_id IN (${tlIds.join(',')}) AND role = 'recruiter'`
+        `SELECT id FROM users WHERE manager_id IN (${tlIds.join(',')}) AND role = 'recruiter' AND tenant_id = ?`,
+        [tenantId]
       );
       userIds = [...userIds, ...tlIds, ...recs.map((r) => r.id)];
     }
   } else if (requester.role === 'team_leader') {
     const [recs] = await db.query(
-      `SELECT id FROM users WHERE manager_id = ? AND role = 'recruiter'`,
-      [requester.id]
+      `SELECT id FROM users WHERE manager_id = ? AND role = 'recruiter' AND tenant_id = ?`,
+      [requester.id, tenantId]
     );
     userIds = [...userIds, ...recs.map((r) => r.id)];
   }
 
-  return { userIds };
+  return { userIds, tenantId };
 };
 
-// ─── Task filter by scope ──────────────────────────────────────
-const buildTaskWhere = (userIds, dateFrom, dateTo) => {
+// ─── Build task WHERE clause with tenant + user scope ─────────
+const buildTaskWhere = (userIds, tenantId, dateFrom, dateTo) => {
   const conditions = [];
   const params     = [];
 
+  // Always scope to tenant
+  conditions.push('t.tenant_id = ?');
+  params.push(tenantId);
+
+  // Scope by user hierarchy if not admin
   if (userIds) {
     conditions.push(`(t.assigned_to IN (${userIds.join(',')}) OR t.assigned_by IN (${userIds.join(',')}))`);
   }
-  if (dateFrom) { conditions.push('t.created_at >= ?'); params.push(dateFrom); }
-  if (dateTo)   {
-    const end = new Date(dateTo); end.setHours(23, 59, 59, 999);
+
+  if (dateFrom && dateFrom.trim()) {
+    conditions.push('t.created_at >= ?');
+    params.push(dateFrom.trim());
+  }
+  if (dateTo && dateTo.trim()) {
+    const end = new Date(dateTo.trim());
+    end.setHours(23, 59, 59, 999);
     conditions.push('t.created_at <= ?');
     params.push(end.toISOString().slice(0, 19).replace('T', ' '));
   }
 
   return {
-    where:  conditions.length ? 'WHERE ' + conditions.join(' AND ') : '',
+    where:  'WHERE ' + conditions.join(' AND '),
     params,
   };
 };
@@ -60,37 +75,42 @@ const buildTaskWhere = (userIds, dateFrom, dateTo) => {
 // OVERVIEW STATS
 // ============================================================
 const getOverviewStats = async ({ requester, dateFrom, dateTo }) => {
-  const { userIds }       = await buildTeamScope(requester);
-  const { where, params } = buildTaskWhere(userIds, dateFrom, dateTo);
+  const { userIds, tenantId } = await buildTeamScope(requester);
+  const { where, params }     = buildTaskWhere(userIds, tenantId, dateFrom, dateTo);
 
   // Task counts by status
   const [statusRows] = await db.query(
-    `SELECT status, COUNT(*) AS count FROM tasks t ${where} GROUP BY status`,
+    `SELECT t.status, COUNT(*) AS count FROM tasks t ${where} GROUP BY t.status`,
     params
   );
 
   // Priority breakdown
   const [priorityRows] = await db.query(
-    `SELECT priority, COUNT(*) AS count FROM tasks t ${where} GROUP BY priority`,
+    `SELECT t.priority, COUNT(*) AS count FROM tasks t ${where} GROUP BY t.priority`,
     params
   );
 
-  // Overdue tasks (due_date < today, not approved)
-  const overdueWhere = where
-    ? where + ` AND t.due_date < CURDATE() AND t.status NOT IN ('approved','rejected')`
-    : `WHERE t.due_date < CURDATE() AND t.status NOT IN ('approved','rejected')`;
+  // Overdue tasks
+  const overdueWhere = where + ` AND t.due_date < CURDATE() AND t.status NOT IN ('approved','rejected')`;
   const [overdueRows] = await db.query(
     `SELECT COUNT(*) AS count FROM tasks t ${overdueWhere}`, params
   );
 
-  // User counts (scoped)
-  let userCountQ = `SELECT COUNT(*) AS total,
-    SUM(CASE WHEN role = 'manager'     THEN 1 ELSE 0 END) AS managers,
-    SUM(CASE WHEN role = 'team_leader' THEN 1 ELSE 0 END) AS team_leaders,
-    SUM(CASE WHEN role = 'recruiter'   THEN 1 ELSE 0 END) AS recruiters
-    FROM users WHERE status = 'active'`;
-  if (userIds) userCountQ += ` AND id IN (${userIds.join(',')})`;
-  const [userCountRow] = await db.query(userCountQ);
+  // User counts scoped to tenant
+  let userWhere  = `WHERE tenant_id = ? AND status = 'active'`;
+  let userParams = [tenantId];
+  if (userIds) {
+    userWhere  += ` AND id IN (${userIds.join(',')})`;
+  }
+
+  const [userCountRow] = await db.query(
+    `SELECT COUNT(*) AS total,
+       SUM(CASE WHEN role = 'manager'     THEN 1 ELSE 0 END) AS managers,
+       SUM(CASE WHEN role = 'team_leader' THEN 1 ELSE 0 END) AS team_leaders,
+       SUM(CASE WHEN role = 'recruiter'   THEN 1 ELSE 0 END) AS recruiters
+     FROM users ${userWhere}`,
+    userParams
+  );
 
   const statusMap = { assigned: 0, in_progress: 0, submitted: 0, approved: 0, rejected: 0 };
   statusRows.forEach((r) => { statusMap[r.status] = parseInt(r.count) || 0; });
@@ -100,9 +120,9 @@ const getOverviewStats = async ({ requester, dateFrom, dateTo }) => {
   priorityRows.forEach((r) => { priorityMap[r.priority] = parseInt(r.count) || 0; });
 
   return {
-    tasks: { ...statusMap, total, overdue: parseInt(overdueRows[0]?.count || 0) },
-    priorities: priorityMap,
-    users: userCountRow[0],
+    tasks:          { ...statusMap, total, overdue: parseInt(overdueRows[0]?.count || 0) },
+    priorities:     priorityMap,
+    users:          userCountRow[0],
     completionRate: total > 0 ? Math.round((statusMap.approved / total) * 100) : 0,
   };
 };
@@ -111,13 +131,11 @@ const getOverviewStats = async ({ requester, dateFrom, dateTo }) => {
 // TASK TREND (last N days)
 // ============================================================
 const getTaskTrend = async ({ requester, days = 14, dateFrom, dateTo }) => {
-  const { userIds } = await buildTeamScope(requester);
+  const { userIds, tenantId } = await buildTeamScope(requester);
 
-  // Generate date series
-  const result  = [];
-  const endDate = dateTo   ? new Date(dateTo)   : new Date();
-  const startDate = dateFrom ? new Date(dateFrom) : new Date();
-  if (!dateFrom) startDate.setDate(endDate.getDate() - (days - 1));
+  const endDate   = dateTo   ? new Date(dateTo)   : new Date();
+  const startDate = dateFrom ? new Date(dateFrom)  : new Date();
+  if (!dateFrom) startDate.setDate(endDate.getDate() - (parseInt(days) - 1));
 
   const dateList = [];
   const cur = new Date(startDate);
@@ -126,19 +144,22 @@ const getTaskTrend = async ({ requester, days = 14, dateFrom, dateTo }) => {
     cur.setDate(cur.getDate() + 1);
   }
 
+  // Build user filter
   const userFilter = userIds
     ? `AND (t.assigned_to IN (${userIds.join(',')}) OR t.assigned_by IN (${userIds.join(',')}))`
     : '';
 
   const [rows] = await db.query(
-    `SELECT DATE(t.created_at) AS date, COUNT(*) AS created,
+    `SELECT DATE(t.created_at) AS date,
+            COUNT(*) AS created,
             SUM(CASE WHEN t.status = 'approved' THEN 1 ELSE 0 END) AS completed
      FROM tasks t
-     WHERE t.created_at BETWEEN ? AND DATE_ADD(?, INTERVAL 1 DAY)
-     ${userFilter}
+     WHERE t.tenant_id = ?
+       AND t.created_at BETWEEN ? AND DATE_ADD(?, INTERVAL 1 DAY)
+       ${userFilter}
      GROUP BY DATE(t.created_at)
      ORDER BY date ASC`,
-    [startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]]
+    [tenantId, startDate.toISOString().split('T')[0], endDate.toISOString().split('T')[0]]
   );
 
   const rowMap = {};
@@ -156,8 +177,8 @@ const getTaskTrend = async ({ requester, days = 14, dateFrom, dateTo }) => {
 // TEAM PERFORMANCE
 // ============================================================
 const getTeamPerformance = async ({ requester, dateFrom, dateTo }) => {
-  const { userIds }       = await buildTeamScope(requester);
-  const { where, params } = buildTaskWhere(userIds, dateFrom, dateTo);
+  const { userIds, tenantId } = await buildTeamScope(requester);
+  const { where, params }     = buildTaskWhere(userIds, tenantId, dateFrom, dateTo);
 
   const [rows] = await db.query(
     `SELECT
@@ -173,14 +194,14 @@ const getTeamPerformance = async ({ requester, dateFrom, dateTo }) => {
        AVG(CASE WHEN t.status = 'approved' AND t.submitted_at IS NOT NULL
             THEN TIMESTAMPDIFF(HOUR, t.created_at, t.submitted_at) END)        AS avg_completion_hours
      FROM users u
-     LEFT JOIN tasks t ON t.assigned_to = u.id ${where ? where.replace('WHERE', 'AND') : ''}
-     WHERE u.status = 'active' AND u.role = 'recruiter'
+     LEFT JOIN tasks t ON t.assigned_to = u.id ${where.replace('WHERE', 'AND')}
+     WHERE u.tenant_id = ? AND u.status = 'active' AND u.role = 'recruiter'
      ${userIds ? `AND u.id IN (${userIds.join(',')})` : ''}
      GROUP BY u.id, u.name, u.role, u.profile_pic
      HAVING total > 0
      ORDER BY approved DESC, total DESC
      LIMIT 20`,
-    params
+    [...params, tenantId]
   );
 
   return rows.map((r) => {
@@ -205,21 +226,21 @@ const getTeamPerformance = async ({ requester, dateFrom, dateTo }) => {
 // PRIORITY BREAKDOWN
 // ============================================================
 const getPriorityBreakdown = async ({ requester, dateFrom, dateTo }) => {
-  const { userIds }       = await buildTeamScope(requester);
-  const { where, params } = buildTaskWhere(userIds, dateFrom, dateTo);
+  const { userIds, tenantId } = await buildTeamScope(requester);
+  const { where, params }     = buildTaskWhere(userIds, tenantId, dateFrom, dateTo);
 
   const [rows] = await db.query(
-    `SELECT priority, status, COUNT(*) AS count
+    `SELECT t.priority, t.status, COUNT(*) AS count
      FROM tasks t ${where}
-     GROUP BY priority, status
-     ORDER BY FIELD(priority,'urgent','high','medium','low'), status`,
+     GROUP BY t.priority, t.status
+     ORDER BY FIELD(t.priority,'urgent','high','medium','low'), t.status`,
     params
   );
 
   const result = { urgent: {}, high: {}, medium: {}, low: {} };
   rows.forEach((r) => {
     if (!result[r.priority]) result[r.priority] = {};
-    result[r.priority][r.status] = parseInt(r.count);
+    result[r.priority][r.status] = parseInt(r.count) || 0;
   });
 
   return Object.entries(result).map(([priority, statuses]) => ({
@@ -238,47 +259,39 @@ const globalSearch = async ({ requester, query, limit = 5 }) => {
   }
 
   const q         = `%${query.trim()}%`;
+  const tenantId  = requester.tenant_id;
   const { userIds } = await buildTeamScope(requester);
-  const taskFilter  = userIds
+
+  const taskFilter = userIds
     ? `AND (t.assigned_to IN (${userIds.join(',')}) OR t.assigned_by IN (${userIds.join(',')}))`
     : '';
-  const userFilter  = userIds ? `AND u.id IN (${userIds.join(',')})` : '';
 
-  // Search tasks
   const [tasks] = await db.query(
     `SELECT t.id, t.title, t.status, t.priority, t.due_date,
             u.name AS assignee_name
      FROM tasks t
      LEFT JOIN users u ON u.id = t.assigned_to
-     WHERE (t.title LIKE ? OR t.description LIKE ?) ${taskFilter}
+     WHERE t.tenant_id = ? AND (t.title LIKE ? OR t.description LIKE ?) ${taskFilter}
      ORDER BY t.created_at DESC LIMIT ?`,
-    [q, q, parseInt(limit)]
+    [tenantId, q, q, parseInt(limit)]
   );
 
-  // Search users (manager+ only)
   let users = [];
   if (ROLE_LEVEL[requester.role] >= ROLE_LEVEL['team_leader']) {
+    const userFilter = userIds ? `AND u.id IN (${userIds.join(',')})` : '';
     const [userRows] = await db.query(
       `SELECT u.id, u.name, u.email, u.role, u.status
        FROM users u
-       WHERE (u.name LIKE ? OR u.email LIKE ?) ${userFilter}
+       WHERE u.tenant_id = ? AND (u.name LIKE ? OR u.email LIKE ?) ${userFilter}
        ORDER BY u.name LIMIT ?`,
-      [q, q, parseInt(limit)]
+      [tenantId, q, q, parseInt(limit)]
     );
     users = userRows;
   }
 
   return {
-    tasks: tasks.map((t) => ({
-      ...t,
-      type: 'task',
-      url:  `/tasks/${t.id}`,
-    })),
-    users: users.map((u) => ({
-      ...u,
-      type: 'user',
-      url:  `/users`,
-    })),
+    tasks: tasks.map((t) => ({ ...t, type: 'task', url: `/tasks/${t.id}` })),
+    users: users.map((u) => ({ ...u, type: 'user', url: `/users` })),
     total: tasks.length + users.length,
   };
 };
