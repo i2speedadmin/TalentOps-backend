@@ -1,18 +1,24 @@
 // ============================================================
 // src/modules/subscriptions/signup.routes.js
+// All routes are PUBLIC (no auth required for signup flow)
 // ============================================================
-const express      = require('express');
-const router       = express.Router();
-const controller   = require('./signup.controller');
-const authenticate = require('../../middleware/auth');
+const express    = require('express');
+const router     = express.Router();
+const controller = require('./signup.controller');
 
-// Public — company signup (no auth required)
-router.post('/register', controller.register);
+// Step 1: Validate inputs + get price (no account created)
+router.post('/validate',                    controller.validate);
 
-// Authenticated — payment initiation (user must be logged in)
-router.post('/payment/razorpay/initiate', authenticate, controller.initiateRazorpay);
-router.post('/payment/razorpay/verify',   authenticate, controller.verifyRazorpay);
-router.post('/payment/stripe/initiate',   authenticate, controller.initiateStripe);
-router.post('/payment/stripe/verify',     authenticate, controller.verifyStripe);
+// Step 2a: Create Razorpay order (no account created)
+router.post('/payment/razorpay/order',      controller.razorpayOrder);
+
+// Step 2b: Create Stripe session (no account created)
+router.post('/payment/stripe/session',      controller.stripeSession);
+
+// Step 3: Complete registration AFTER payment success
+router.post('/complete',                    controller.complete);
+
+// Free path: 100% promo discount - create trial account immediately
+router.post('/register-free',               controller.registerFree);
 
 module.exports = router;

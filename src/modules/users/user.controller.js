@@ -1,5 +1,6 @@
 // ============================================================
 // src/modules/users/user.controller.js
+// FIXED: passes req.tenant and req.user.tenant_id to all service calls
 // ============================================================
 
 const userService = require('./user.service');
@@ -33,6 +34,7 @@ const createUser = async (req, res) => {
   try {
     const user = await userService.createUser({
       requester: req.user,
+      tenant:    req.tenant,   // passes plan info for user limit check
       body:      req.body,
       ip:        req.ip,
     });
@@ -90,10 +92,11 @@ const resetUserPassword = async (req, res) => {
 const updateProfile = async (req, res) => {
   try {
     const user = await userService.updateProfile({
-      userId: req.user.id,
-      body:   req.body,
-      file:   req.file,
-      ip:     req.ip,
+      userId:   req.user.id,
+      tenantId: req.user.tenant_id,
+      body:     req.body,
+      file:     req.file,
+      ip:       req.ip,
     });
     res.json({ success: true, message: 'Profile updated successfully.', user });
   } catch (err) {
@@ -111,8 +114,18 @@ const getManagers = async (req, res) => {
   }
 };
 
+// GET /api/users/assignable
+const getAssignableUsers = async (req, res) => {
+  try {
+    const users = await userService.getAssignableUsers(req.user);
+    res.json({ success: true, users });
+  } catch (err) {
+    res.status(err.status || 500).json({ success: false, message: err.message });
+  }
+};
+
 module.exports = {
   getAllUsers, getUserById, createUser,
   updateUser, deleteUser, resetUserPassword,
-  updateProfile, getManagers,
+  updateProfile, getManagers, getAssignableUsers,
 };

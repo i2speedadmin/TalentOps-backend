@@ -80,6 +80,7 @@ seed_Prod.js
 
 # dotenv environment variable files
 .env
+.env.prod
 .env.example
 .env.development.local
 .env.test.local
