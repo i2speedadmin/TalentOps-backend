@@ -29,7 +29,15 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // ─── Static Files (Uploads) ───────────────────────────────────
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// ─── Health Check ─────────────────────────────────────────────
+// ─── Static public files (status page) ───────────────────────
+app.use('/public', express.static(path.join(__dirname, 'public')));
+
+// ─── Status Page (HTML) ───────────────────────────────────────
+app.get('/status', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'status.html'));
+});
+
+// ─── Health Check (JSON) ──────────────────────────────────────
 app.get('/api/health', (req, res) => {
   res.json({
     success:     true,
@@ -38,6 +46,11 @@ app.get('/api/health', (req, res) => {
     version:     '7.0.0',
     environment: process.env.NODE_ENV || 'development',
     timestamp:   new Date().toISOString(),
+    uptime:      process.uptime(),
+    memory:      {
+      used:  Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
+      total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + 'MB',
+    },
   });
 });
 

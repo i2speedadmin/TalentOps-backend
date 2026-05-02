@@ -4,11 +4,11 @@
 -- Run this in phpMyAdmin / cPanel MySQL
 -- ============================================================
 
-CREATE DATABASE IF NOT EXISTS amcgrvfy_TalentOpsDev
+CREATE DATABASE IF NOT EXISTS amcgrvfy_TalentOpsProd
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-USE amcgrvfy_TalentOpsDev;
+USE amcgrvfy_TalentOpsProd;
 
 -- ============================================================
 -- ███████╗ █████╗  █████╗ ███████╗    ██████╗

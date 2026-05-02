@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TalentOps API — System Status</title>
+<link rel="icon" type="image/png" href="/public/img/favicon.png" />
+<link rel="shortcut icon" href="/public/img/favicon.png" />
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--green:#10b981;--green-bg:#d1fae5;--green-border:#6ee7b7;--red:#ef4444;--red-bg:#fee2e2;--red-border:#fca5a5;--yellow:#f59e0b;--yellow-bg:#fef3c7;--yellow-border:#fde68a;--blue:#4f46e5;--bg:#f1f5f9;--card:#fff;--text:#1e293b;--muted:#64748b;--border:#e2e8f0}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.header{background:linear-gradient(135deg,#0f172a,#1e1b4b 50%,#312e81);color:#fff;padding:0 1.5rem}
+.header-inner{max-width:900px;margin:0 auto;padding:1.5rem 0;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:1rem}
+.brand{display:flex;align-items:center;gap:.75rem}
+.brand-icon{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#4f46e5,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:1.3rem}
+.brand-name{font-size:1.2rem;font-weight:800}.brand-sub{font-size:.72rem;color:rgba(255,255,255,.55)}
+.header-meta{font-size:.78rem;color:rgba(255,255,255,.55);text-align:right}
+.header-meta span{color:rgba(255,255,255,.85)}
+.status-banner{padding:0 1.5rem}
+.status-banner-inner{max-width:900px;margin:0 auto;padding:1.5rem 0}
+.overall-card{border-radius:14px;padding:1.25rem 1.5rem;display:flex;align-items:center;gap:1rem;border:2px solid;transition:all .3s}
+.overall-card.operational{background:var(--green-bg);border-color:var(--green-border)}
+.overall-card.degraded{background:var(--yellow-bg);border-color:var(--yellow-border)}
+.overall-card.outage{background:var(--red-bg);border-color:var(--red-border)}
+.overall-icon{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.6rem;flex-shrink:0}
+.overall-title{font-size:1.1rem;font-weight:800}.overall-sub{font-size:.82rem;margin-top:.15rem}
+.container{max-width:900px;margin:0 auto;padding:0 1.5rem 3rem}
+.section-title{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:1.75rem 0 .75rem}
+.services-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.service-row{display:flex;align-items:center;justify-content:space-between;padding:.9rem 1.25rem;border-bottom:1px solid #f8fafc;transition:background .15s;gap:1rem}
+.service-row:last-child{border-bottom:none}.service-row:hover{background:#f8fafc}
+.service-left{display:flex;align-items:center;gap:.75rem;flex:1;min-width:0}
+.service-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0}
+.service-name{font-weight:600;font-size:.88rem}.service-url{font-size:.72rem;color:var(--muted);font-family:monospace;margin-top:.1rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
+.service-right{display:flex;align-items:center;gap:.875rem;flex-shrink:0}
+.response-time{font-size:.78rem;color:var(--muted);font-family:monospace;min-width:55px;text-align:right}
+.status-badge{display:inline-flex;align-items:center;gap:.3rem;padding:.25rem .7rem;border-radius:99px;font-size:.72rem;font-weight:700;white-space:nowrap}
+.badge-ok{background:var(--green-bg);color:#065f46}.badge-error{background:var(--red-bg);color:#991b1b}
+.badge-warn{background:var(--yellow-bg);color:#92400e}.badge-pending{background:#f1f5f9;color:var(--muted)}
+.status-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+.metrics-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-top:1rem}
+.metric-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1rem;text-align:center}
+.metric-value{font-size:1.5rem;font-weight:800;color:var(--blue);line-height:1;margin-bottom:.25rem}
+.metric-label{font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.refresh-btn{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:.5rem 1.25rem;border-radius:8px;font-size:.82rem;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:.4rem;transition:all .2s;margin-top:.5rem}
+.refresh-btn:hover{opacity:.88;transform:translateY(-1px)}.refresh-btn:disabled{opacity:.6;cursor:not-allowed;transform:none}
+.logo{width: 200px;padding: 10px;}
+.i2s-active {color:#4f46e5; text-decoration: none; font-weight: 600;font-style: italic;}
+.spin{animation:spin .7s linear infinite;display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.footer{text-align:center;padding:1.5rem;font-size:.78rem;color:var(--muted);border-top:1px solid var(--border);margin-top:2rem}
+@media(max-width:640px){.metrics-grid{grid-template-columns:1fr 1fr}.service-url{display:none}.header-inner{flex-direction:column;align-items:flex-start}.header-meta{text-align:left}}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-inner">
+    <div class="brand">
+      <!-- <div class="brand-icon">⚡</div>
+      <div><div class="brand-name">TalentOps API</div><div class="brand-sub">System Status &amp; Health Monitor</div></div> -->
+      <img src="/public/img/logo.png" alt="TalentOps Logo" class="logo" />
+    </div>
+    <div class="header-meta">
+      <div>Last checked: <span id="last-updated">—</span></div>
+      <div><button class="refresh-btn" onclick="runChecks()" id="refresh-btn"><span id="refresh-icon">↻</span> Refresh</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="status-banner">
+  <div class="status-banner-inner">
+    <div class="overall-card degraded" id="overall-card">
+      <div class="overall-icon" id="overall-icon">⏳</div>
+      <div>
+        <div class="overall-title" id="overall-title">Checking system status…</div>
+        <div class="overall-sub" id="overall-sub">Running health checks on all services</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+  <div class="section-title">Platform Metrics</div>
+  <div class="metrics-grid">
+    <div class="metric-card"><div class="metric-value" id="metric-uptime">—</div><div class="metric-label">Server Uptime</div></div>
+    <div class="metric-card"><div class="metric-value" id="metric-avg-rt">—</div><div class="metric-label">Avg Response</div></div>
+    <div class="metric-card"><div class="metric-value" id="metric-checks">—</div><div class="metric-label">Endpoints OK</div></div>
+    <div class="metric-card"><div class="metric-value" id="metric-version">—</div><div class="metric-label">API Version</div></div>
+  </div>
+
+  <div class="section-title">Core Services</div>
+  <div class="services-card" id="core-services"></div>
+
+  <div class="section-title">Authentication</div>
+  <div class="services-card" id="auth-services"></div>
+
+  <div class="section-title">Business Services</div>
+  <div class="services-card" id="business-services"></div>
+
+  <div class="section-title">Super Admin</div>
+  <div class="services-card" id="admin-services"></div>
+
+  <div class="section-title">Public &amp; Signup</div>
+  <div class="services-card" id="public-services"></div>
+</div>
+
+<div class="footer">
+  <span class="i2s-active">TalentOps</span> API Status &nbsp;·&nbsp; . All rights reserved. Powered by <a target="_blank" href="http://i2speed.in" class="i2s-active">I2Speed</a><span id="footer-year"></span>
+</div>
+
+<script>
+document.getElementById('footer-year').textContent = new Date().getFullYear();
+const BASE = window.location.origin;
+
+const GROUPS = [
+  { id:'core-services', services:[
+    { name:'Health Check',       icon:'❤️', color:'#fce7f3', url:'/api/health',               method:'GET'  },
+    { name:'API Info',           icon:'🌐', color:'#e0e7ff', url:'/api',                      method:'GET'  },
+  ]},
+  { id:'auth-services', services:[
+    { name:'User Login',         icon:'🔐', color:'#dbeafe', url:'/api/auth/login',            method:'POST' },
+    { name:'Get Current User',   icon:'👤', color:'#dbeafe', url:'/api/auth/me',               method:'GET'  },
+    { name:'Forgot Password',    icon:'📧', color:'#fef3c7', url:'/api/auth/forgot-password',  method:'POST' },
+    { name:'Super Admin Login',  icon:'🛡️', color:'#fee2e2', url:'/api/superadmin/login',      method:'POST' },
+  ]},
+  { id:'business-services', services:[
+    { name:'Tasks',              icon:'📋', color:'#d1fae5', url:'/api/tasks',                 method:'GET'  },
+    { name:'Users',              icon:'👥', color:'#d1fae5', url:'/api/users',                 method:'GET'  },
+    { name:'Notifications',      icon:'🔔', color:'#fef3c7', url:'/api/notifications',         method:'GET'  },
+    { name:'Reports Overview',   icon:'📊', color:'#e0e7ff', url:'/api/reports/overview',      method:'GET'  },
+    { name:'Audit Logs',         icon:'📝', color:'#f3e8ff', url:'/api/audit',                 method:'GET'  },
+    { name:'Comments',           icon:'💬', color:'#d1fae5', url:'/api/comments',              method:'GET'  },
+  ]},
+  { id:'admin-services', services:[
+    { name:'SA Dashboard',       icon:'📈', color:'#fee2e2', url:'/api/superadmin/dashboard',  method:'GET'  },
+    { name:'SA Tenants',         icon:'🏢', color:'#fee2e2', url:'/api/superadmin/tenants',    method:'GET'  },
+    { name:'SA Payments',        icon:'💳', color:'#fee2e2', url:'/api/superadmin/payments',   method:'GET'  },
+    { name:'Platform Settings',  icon:'⚙️', color:'#f3e8ff', url:'/api/settings',              method:'GET'  },
+  ]},
+  { id:'public-services', services:[
+    { name:'Plans (Public)',     icon:'💰', color:'#d1fae5', url:'/api/plans',                 method:'GET'  },
+    { name:'Gateway Status',     icon:'💳', color:'#d1fae5', url:'/api/settings/gateways',     method:'GET'  },
+    { name:'Promo Validate',     icon:'🎁', color:'#fef3c7', url:'/api/promos/validate?code=X',method:'GET'  },
+    { name:'Company Signup',     icon:'🚀', color:'#e0e7ff', url:'/api/signup/register',       method:'POST' },
+  ]},
+];
+
+function fmt(ms){ if(ms===null)return '—'; return ms<1000?ms+'ms':(ms/1000).toFixed(1)+'s'; }
+
+function renderRow(s, state='pending', ms=null){
+  const mBg = s.method==='GET'?'#d1fae5':'#dbeafe', mCl = s.method==='GET'?'#065f46':'#1e40af';
+  let badge, rtColor='#94a3b8';
+  if(state==='pending') badge=`<span class="status-badge badge-pending"><span class="status-dot"></span>Checking…</span>`;
+  else if(state==='ok'){ badge=`<span class="status-badge badge-ok"><span class="status-dot"></span>Operational</span>`; rtColor='#10b981'; }
+  else if(state==='warn') badge=`<span class="status-badge badge-warn"><span class="status-dot"></span>Auth Required</span>`;
+  else badge=`<span class="status-badge badge-error"><span class="status-dot"></span>Error</span>`;
+  return `<div class="service-row" id="row-${btoa(s.url).replace(/=/g,'')}">
+    <div class="service-left">
+      <div class="service-icon" style="background:${s.color}">${s.icon}</div>
+      <div>
+        <div class="service-name">${s.name} <span style="font-size:.65rem;background:${mBg};color:${mCl};padding:.1rem .4rem;border-radius:4px;font-weight:700;margin-left:.25rem">${s.method}</span></div>
+        <div class="service-url">${s.url}</div>
+      </div>
+    </div>
+    <div class="service-right">
+      <div class="response-time" style="color:${rtColor}">${ms!==null?fmt(ms):'—'}</div>
+      ${badge}
+    </div>
+  </div>`;
+}
+
+async function checkEndpoint(s){
+  const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),8000); const t0=Date.now();
+  try{
+    const r=await fetch(BASE+s.url,{method:s.method,headers:{'Content-Type':'application/json'},body:s.method==='POST'?JSON.stringify({}):undefined,signal:ctrl.signal});
+    clearTimeout(t); const ms=Date.now()-t0;
+    if(r.status>=200&&r.status<300)return{state:'ok',ms};
+    if(r.status===401||r.status===403)return{state:'warn',ms};
+    if(r.status===400||r.status===404||r.status===422)return{state:'warn',ms};
+    return{state:'error',ms};
+  }catch(e){ clearTimeout(t); return{state:e.name==='AbortError'?'error':'error',ms:null}; }
+}
+
+function renderAllPending(){
+  GROUPS.forEach(({id,services})=>{ const el=document.getElementById(id); if(el)el.innerHTML=services.map(s=>renderRow(s)).join(''); });
+}
+
+async function runChecks(){
+  const btn=document.getElementById('refresh-btn'), icon=document.getElementById('refresh-icon');
+  btn.disabled=true; icon.className='spin';
+  renderAllPending();
+  const all=GROUPS.flatMap(g=>g.services);
+  let ok=0,warn=0,err=0; const rts=[];
+  document.getElementById('overall-card').className='overall-card degraded';
+  document.getElementById('overall-icon').textContent='⏳';
+  document.getElementById('overall-title').textContent='Running health checks…';
+  document.getElementById('overall-sub').textContent=`Checking ${all.length} endpoints`;
+
+  await Promise.all(all.map(async s=>{
+    const res=await checkEndpoint(s);
+    const rowId=`row-${btoa(s.url).replace(/=/g,'')}`;
+    const row=document.getElementById(rowId);
+    if(row)row.outerHTML=renderRow(s,res.state,res.ms);
+    if(res.ms!==null)rts.push(res.ms);
+    if(res.state==='ok')ok++; else if(res.state==='warn')warn++; else err++;
+  }));
+
+  let version='7.0.0',uptime='—';
+  try{
+    const h=await fetch(BASE+'/api/health'); const d=await h.json();
+    version=d.version||version;
+    if(d.uptime){ const s=Math.floor(d.uptime); uptime=s>86400?Math.floor(s/86400)+'d':s>3600?Math.floor(s/3600)+'h':Math.floor(s/60)+'m '+s%60+'s'; }
+  }catch{}
+
+  const avg=rts.length?Math.round(rts.reduce((a,b)=>a+b,0)/rts.length):0;
+  document.getElementById('metric-uptime').textContent=uptime;
+  document.getElementById('metric-avg-rt').textContent=fmt(avg);
+  document.getElementById('metric-checks').textContent=ok+'/'+all.length;
+  document.getElementById('metric-version').textContent='v'+version;
+
+  const card=document.getElementById('overall-card');
+  if(err===0){
+    card.className='overall-card operational';
+    document.getElementById('overall-icon').textContent='✅';
+    document.getElementById('overall-title').textContent='All Systems Operational';
+    document.getElementById('overall-sub').textContent=`${ok} operational · ${warn} auth-protected (expected) · Avg ${fmt(avg)}`;
+  } else {
+    card.className='overall-card outage';
+    document.getElementById('overall-icon').textContent='🔴';
+    document.getElementById('overall-title').textContent=`${err} Service${err>1?'s':''} Unavailable`;
+    document.getElementById('overall-sub').textContent=`${ok} OK · ${warn} auth-required · ${err} errors`;
+  }
+  document.getElementById('last-updated').textContent=new Date().toLocaleTimeString();
+  btn.disabled=false; icon.className='';
+}
+
+runChecks();
+setInterval(runChecks, 60000);
+</script>
+</body>
+</html>

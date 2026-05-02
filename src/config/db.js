@@ -28,7 +28,8 @@ const pool = mysql.createPool({
 // Test connection on startup
 pool.getConnection()
   .then(connection => {
-    console.log('✅ MySQL connected successfully');
+    // console.log('✅ MySQL connected successfully');    
+    console.log(`\n📦 ✅ MySQL connected successfully to  ${process.env.DB_HOST} ${process.env.DB_NAME} !\n`);
     connection.release();
   })
   .catch(err => {

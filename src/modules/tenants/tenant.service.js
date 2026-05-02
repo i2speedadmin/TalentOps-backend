@@ -168,4 +168,26 @@ const changeTenantPlan = async ({ id, planId, billingCycle, adminId, ip }) => {
   return { message: `Tenant plan changed to ${p.name} (${billingCycle}).` };
 };
 
-module.exports = { getTenants, getTenantById, updateTenantStatus, extendTrial, changeTenantPlan };
+// ─── DELETE TENANT ───────────────────────────────────────────
+const deleteTenant = async ({ id, adminId, ip }) => {
+  const [rows] = await db.query('SELECT id, name FROM tenants WHERE id = ? LIMIT 1', [id]);
+  if (!rows.length) throw { status: 404, message: 'Tenant not found.' };
+
+  // Hard delete — cascades via FK to users, tasks, etc.
+  await db.query('SET FOREIGN_KEY_CHECKS = 0');
+  await db.query('DELETE FROM audit_logs    WHERE tenant_id = ?', [id]);
+  await db.query('DELETE FROM notifications WHERE tenant_id = ?', [id]);
+  await db.query('DELETE FROM task_files    WHERE tenant_id = ?', [id]);
+  await db.query('DELETE FROM task_comments WHERE tenant_id = ?', [id]);
+  await db.query('DELETE FROM tasks         WHERE tenant_id = ?', [id]);
+  await db.query('DELETE FROM users         WHERE tenant_id = ?', [id]);
+  await db.query('DELETE FROM payments      WHERE tenant_id = ?', [id]);
+  await db.query('DELETE FROM promo_code_usages WHERE tenant_id = ?', [id]);
+  await db.query('DELETE FROM subscriptions WHERE tenant_id = ?', [id]);
+  await db.query('DELETE FROM tenants       WHERE id = ?',        [id]);
+  await db.query('SET FOREIGN_KEY_CHECKS = 1');
+
+  return { message: `Company "${rows[0].name}" and all data permanently deleted.` };
+};
+
+module.exports = { getTenants, getTenantById, updateTenantStatus, extendTrial, changeTenantPlan, deleteTenant };

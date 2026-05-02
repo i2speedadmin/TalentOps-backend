@@ -29,4 +29,11 @@ const changePlan     = async (req, res) => {
   } catch (err) { res.status(err.status || 500).json({ success: false, message: err.message }); }
 };
 
-module.exports = { getTenants, getTenantById, updateStatus, extendTrial, changePlan };
+const deleteTenant   = async (req, res) => {
+  try {
+    const result = await require('./tenant.service').deleteTenant({ id: req.params.id, adminId: req.superAdmin.id, ip: req.ip });
+    res.json({ success: true, ...result });
+  } catch (err) { res.status(err.status || 500).json({ success: false, message: err.message }); }
+};
+
+module.exports = { getTenants, getTenantById, updateStatus, extendTrial, changePlan, deleteTenant };

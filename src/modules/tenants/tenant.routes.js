@@ -14,5 +14,6 @@ router.get('/:id',                 controller.getTenantById);
 router.patch('/:id/status',        controller.updateStatus);
 router.post('/:id/extend-trial',   controller.extendTrial);
 router.post('/:id/change-plan',    controller.changePlan);
+router.delete('/:id',              controller.deleteTenant);
 
 module.exports = router;

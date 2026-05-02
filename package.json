@@ -9,7 +9,9 @@
     "schema": "node src/config/schema.js",
     "seed": "node src/config/seed.js",
     "setup": "node src/config/schema.js && node src/config/seed.js",
-    "reset": "node src/config/reset.js && npm run setup"
+    "reset": "node src/config/reset.js && npm run setup",
+    "setupprod": "node src/config/schema_Prod.js && node src/config/seed_Prod.js",
+    "resetprod": "node src/config/reset.js && npm run setupprod"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
