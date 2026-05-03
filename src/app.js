@@ -78,6 +78,12 @@ app.use('/api/notifications', require('./modules/notifications/notification.rout
 app.use('/api/audit',         require('./modules/audit/audit.routes'));
 app.use('/api/reports',       require('./modules/reports/report.routes'));
 
+// Subscription management (company admin - upgrade/downgrade/renew)
+app.use('/api/subscription', require('./modules/subscriptions/subscription.routes'));
+
+// Cron job endpoint (called by Render Cron Job or external scheduler)
+app.post('/api/internal/cron/subscription-reminders', require('./modules/subscriptions/subscription.controller').cronReminders);
+
 // ─── Super Admin Routes ───────────────────────────────────────
 app.use('/api/superadmin',    require('./modules/superadmin/superadmin.routes'));
 app.use('/api/superadmin/tenants', require('./modules/tenants/tenant.routes'));

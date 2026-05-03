@@ -1,19 +1,17 @@
 // ============================================================
 // src/modules/tenants/tenant.routes.js
 // ============================================================
-
 const express        = require('express');
 const router         = express.Router();
-const controller     = require('./tenant.controller');
+const ctrl           = require('./tenant.controller');
 const superAdminAuth = require('../../middleware/superAdminAuth');
 
 router.use(superAdminAuth);
-
-router.get('/',                    controller.getTenants);
-router.get('/:id',                 controller.getTenantById);
-router.patch('/:id/status',        controller.updateStatus);
-router.post('/:id/extend-trial',   controller.extendTrial);
-router.post('/:id/change-plan',    controller.changePlan);
-router.delete('/:id',              controller.deleteTenant);
+router.get('/',                     ctrl.getTenants);
+router.get('/:id',                  ctrl.getTenantById);
+router.patch('/:id/status',         ctrl.updateStatus);
+router.post('/:id/extend-trial',    ctrl.extendTrial);
+router.post('/:id/change-plan',     ctrl.changePlan);
+router.delete('/:id',               ctrl.deleteTenant);
 
 module.exports = router;

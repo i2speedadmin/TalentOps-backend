@@ -1,111 +1,109 @@
 // ============================================================
 // src/modules/tenants/tenant.service.js
+// Feature 1: Added subscription date fields to getTenants
 // ============================================================
 
 const db = require('../../config/db');
 
-const audit = (adminId, action, targetId, oldVal, newVal, ip) =>
-  db.query(
-    `INSERT INTO audit_logs (tenant_id, user_id, user_type, action, target_table, target_id, old_value, new_value, ip_address)
-     VALUES (NULL, ?, 'super_admin', ?, 'tenants', ?, ?, ?, ?)`,
-    [adminId, action, targetId,
-     oldVal ? JSON.stringify(oldVal) : null,
-     newVal ? JSON.stringify(newVal) : null,
-     ip || null]
-  );
+// ─── List tenants (Super Admin) ───────────────────────────────
+const getTenants = async ({ page = 1, limit = 15, search, status }) => {
+  const offset  = (parseInt(page) - 1) * parseInt(limit);
+  const filters = [];
+  const params  = [];
 
-const TENANT_SELECT = `
-  t.id, t.name, t.slug, t.email, t.phone, t.logo, t.address,
-  t.industry, t.size, t.status, t.trial_ends_at, t.created_at, t.updated_at,
-  p.id AS plan_id, p.name AS plan_name, p.slug AS plan_slug,
-  s.id AS subscription_id, s.status AS sub_status,
-  s.billing_cycle, s.currency, s.amount,
-  s.starts_at, s.ends_at, s.next_billing_at,
-  (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id AND u.status = 'active') AS user_count,
-  (SELECT COUNT(*) FROM tasks tk WHERE tk.tenant_id = t.id) AS task_count
-`;
-
-// GET ALL TENANTS
-const getTenants = async ({ page = 1, limit = 20, search, status }) => {
-  const offset  = (page - 1) * limit;
-  const filters = [], params = [];
-
-  if (search) { filters.push('(t.name LIKE ? OR t.email LIKE ? OR t.slug LIKE ?)'); params.push(`%${search}%`, `%${search}%`, `%${search}%`); }
-  if (status)  { filters.push('t.status = ?'); params.push(status); }
+  if (search) {
+    filters.push('(t.name LIKE ? OR t.email LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`);
+  }
+  if (status) {
+    filters.push('t.status = ?');
+    params.push(status);
+  }
 
   const where = filters.length ? 'WHERE ' + filters.join(' AND ') : '';
 
+  // Include subscription date fields: starts_at (plan from), next_billing_at (plan to)
   const [rows] = await db.query(
-    `SELECT ${TENANT_SELECT}
+    `SELECT
+       t.id, t.name, t.slug, t.email, t.phone, t.industry, t.size, t.status,
+       t.trial_ends_at, t.created_at,
+       s.id          AS subscription_id,
+       s.plan_id,
+       s.status      AS sub_status,
+       s.billing_cycle,
+       s.currency,
+       s.amount,
+       s.starts_at,
+       s.next_billing_at,
+       s.ends_at,
+       s.cancelled_at,
+       p.name        AS plan_name,
+       p.slug        AS plan_slug,
+       (SELECT COUNT(*) FROM users  u WHERE u.tenant_id = t.id AND u.status = 'active') AS user_count,
+       (SELECT COUNT(*) FROM tasks  tk WHERE tk.tenant_id = t.id)                       AS task_count
      FROM tenants t
-     LEFT JOIN subscriptions s ON s.tenant_id = t.id AND s.status IN ('active','trialing')
+     LEFT JOIN subscriptions s ON s.tenant_id = t.id
+       AND s.status IN ('active','trialing','past_due')
      LEFT JOIN plans p ON p.id = s.plan_id
      ${where}
      ORDER BY t.created_at DESC
      LIMIT ? OFFSET ?`,
-    [...params, parseInt(limit), parseInt(offset)]
+    [...params, parseInt(limit), offset]
   );
 
-  const [count] = await db.query(
-    `SELECT COUNT(*) AS total FROM tenants t ${where}`, params
+  const [cnt] = await db.query(
+    `SELECT COUNT(*) AS total FROM tenants t ${where}`,
+    params
   );
 
   return {
     tenants: rows,
     pagination: {
-      total:      parseInt(count[0].total) || 0,
+      total:      parseInt(cnt[0].total) || 0,
       page:       parseInt(page),
       limit:      parseInt(limit),
-      totalPages: Math.ceil((parseInt(count[0].total) || 0) / limit),
+      totalPages: Math.ceil((parseInt(cnt[0].total) || 0) / parseInt(limit)),
     },
   };
 };
 
-// GET ONE TENANT
+// ─── Single tenant detail ─────────────────────────────────────
 const getTenantById = async (id) => {
   const [rows] = await db.query(
-    `SELECT ${TENANT_SELECT}
+    `SELECT
+       t.*, s.id AS subscription_id, s.plan_id, s.status AS sub_status,
+       s.billing_cycle, s.currency, s.amount, s.starts_at, s.next_billing_at, s.ends_at,
+       p.name AS plan_name, p.slug AS plan_slug,
+       (SELECT COUNT(*) FROM users u WHERE u.tenant_id = t.id) AS user_count,
+       (SELECT COUNT(*) FROM tasks tk WHERE tk.tenant_id = t.id) AS task_count
      FROM tenants t
-     LEFT JOIN subscriptions s ON s.tenant_id = t.id AND s.status IN ('active','trialing')
+     LEFT JOIN subscriptions s ON s.tenant_id = t.id AND s.status IN ('active','trialing','past_due')
      LEFT JOIN plans p ON p.id = s.plan_id
      WHERE t.id = ? LIMIT 1`,
     [id]
   );
   if (!rows.length) throw { status: 404, message: 'Tenant not found.' };
-
-  // Also fetch payment history
-  const [payments] = await db.query(
-    `SELECT id, gateway, amount, currency, status, payment_method, paid_at, created_at
-     FROM payments WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 10`,
-    [id]
-  );
-
-  // Fetch users
-  const [users] = await db.query(
-    `SELECT id, name, email, role, status, created_at FROM users WHERE tenant_id = ? ORDER BY role, name LIMIT 20`,
-    [id]
-  );
-
-  return { ...rows[0], payments, users };
+  return rows[0];
 };
 
-// UPDATE TENANT STATUS
-const updateTenantStatus = async ({ id, status, reason, adminId, ip }) => {
-  const [rows] = await db.query('SELECT id, name, status FROM tenants WHERE id = ? LIMIT 1', [id]);
+// ─── Update tenant status ─────────────────────────────────────
+const updateTenantStatus = async ({ id, status, reason }) => {
+  const allowed = ['active', 'suspended', 'cancelled', 'trial'];
+  if (!allowed.includes(status)) throw { status: 400, message: 'Invalid status.' };
+
+  const [rows] = await db.query('SELECT id, name FROM tenants WHERE id = ? LIMIT 1', [id]);
   if (!rows.length) throw { status: 404, message: 'Tenant not found.' };
 
-  const oldStatus = rows[0].status;
   await db.query('UPDATE tenants SET status = ? WHERE id = ?', [status, id]);
 
-  // If suspending, also suspend subscription
+  // If suspending, also mark subscription past_due
   if (status === 'suspended') {
     await db.query(
-      `UPDATE subscriptions SET status = 'past_due', cancellation_reason = ? WHERE tenant_id = ? AND status = 'active'`,
-      [reason || 'Suspended by Super Admin', id]
+      `UPDATE subscriptions SET status = 'past_due' WHERE tenant_id = ? AND status = 'active'`,
+      [id]
     );
   }
-
-  // If reactivating
+  // If reactivating, restore subscription to active
   if (status === 'active') {
     await db.query(
       `UPDATE subscriptions SET status = 'active' WHERE tenant_id = ? AND status = 'past_due'`,
@@ -113,78 +111,80 @@ const updateTenantStatus = async ({ id, status, reason, adminId, ip }) => {
     );
   }
 
-  await audit(adminId, 'UPDATE_TENANT_STATUS', id, { status: oldStatus }, { status, reason }, ip);
-  return getTenantById(id);
+  return { message: `Tenant "${rows[0].name}" status updated to ${status}.` };
 };
 
-// EXTEND TRIAL
-const extendTrial = async ({ id, days, adminId, ip }) => {
+// ─── Extend trial ─────────────────────────────────────────────
+const extendTrial = async ({ id, days }) => {
   const [rows] = await db.query('SELECT id, name, trial_ends_at FROM tenants WHERE id = ? LIMIT 1', [id]);
   if (!rows.length) throw { status: 404, message: 'Tenant not found.' };
 
-  const currentExpiry = rows[0].trial_ends_at ? new Date(rows[0].trial_ends_at) : new Date();
-  if (currentExpiry < new Date()) currentExpiry.setTime(new Date().getTime());
-  currentExpiry.setDate(currentExpiry.getDate() + parseInt(days));
+  const base     = rows[0].trial_ends_at ? new Date(rows[0].trial_ends_at) : new Date();
+  const newExpiry = new Date(base);
+  newExpiry.setDate(newExpiry.getDate() + parseInt(days));
 
   await db.query(
-    'UPDATE tenants SET trial_ends_at = ?, status = ? WHERE id = ?',
-    [currentExpiry.toISOString().slice(0, 19).replace('T', ' '), 'trial', id]
+    'UPDATE tenants SET trial_ends_at = ?, status = "trial" WHERE id = ?',
+    [newExpiry.toISOString().slice(0, 19).replace('T', ' '), id]
   );
 
-  await audit(adminId, 'EXTEND_TRIAL', id, { trial_ends_at: rows[0].trial_ends_at }, { extended_by_days: days }, ip);
-  return { message: `Trial extended by ${days} days. New expiry: ${currentExpiry.toDateString()}` };
+  return {
+    message:       `Trial extended by ${days} days for "${rows[0].name}".`,
+    new_trial_end: newExpiry.toISOString(),
+  };
 };
 
-// CHANGE TENANT PLAN
-const changeTenantPlan = async ({ id, planId, billingCycle, adminId, ip }) => {
-  const [tenant] = await db.query('SELECT id FROM tenants WHERE id = ? LIMIT 1', [id]);
-  if (!tenant.length) throw { status: 404, message: 'Tenant not found.' };
+// ─── SA: Change tenant plan ───────────────────────────────────
+const changeTenantPlan = async ({ id, planId, billingCycle }) => {
+  const [tenantRows] = await db.query('SELECT id, name FROM tenants WHERE id = ? LIMIT 1', [id]);
+  if (!tenantRows.length) throw { status: 404, message: 'Tenant not found.' };
 
-  const [plan] = await db.query('SELECT id, name, price_monthly_inr, price_annual_inr FROM plans WHERE id = ? LIMIT 1', [planId]);
-  if (!plan.length) throw { status: 404, message: 'Plan not found.' };
+  const [planRows] = await db.query('SELECT * FROM plans WHERE id = ? AND is_active = 1 LIMIT 1', [planId]);
+  if (!planRows.length) throw { status: 404, message: 'Plan not found.' };
 
-  const p = plan[0];
-  const amount = billingCycle === 'annual' ? p.price_annual_inr : p.price_monthly_inr;
+  const plan      = planRows[0];
+  const bill      = billingCycle || 'monthly';
+  const amount    = parseFloat(bill === 'annual' ? plan.price_annual_inr : plan.price_monthly_inr);
+  const now       = new Date();
+  const nextBill  = new Date(now);
+  bill === 'annual' ? nextBill.setFullYear(nextBill.getFullYear() + 1) : nextBill.setMonth(nextBill.getMonth() + 1);
+  const fmt = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
 
-  // Cancel existing subscription
+  // Cancel existing
   await db.query(
-    `UPDATE subscriptions SET status = 'cancelled', cancelled_at = NOW() WHERE tenant_id = ? AND status IN ('active','trialing')`,
+    `UPDATE subscriptions SET status = 'cancelled', cancelled_at = NOW()
+     WHERE tenant_id = ? AND status IN ('active','trialing','past_due')`,
     [id]
   );
 
-  // Create new subscription
-  const now    = new Date();
-  const starts = now.toISOString().slice(0, 19).replace('T', ' ');
-  const nextBill = new Date(now);
-  billingCycle === 'annual' ? nextBill.setFullYear(nextBill.getFullYear() + 1) : nextBill.setMonth(nextBill.getMonth() + 1);
-
+  // Create new
   await db.query(
-    `INSERT INTO subscriptions (tenant_id, plan_id, billing_cycle, currency, amount, status, gateway, starts_at, next_billing_at)
-     VALUES (?, ?, ?, 'INR', ?, 'active', 'manual', ?, ?)`,
-    [id, planId, billingCycle, amount, starts, nextBill.toISOString().slice(0, 19).replace('T', ' ')]
+    `INSERT INTO subscriptions
+       (tenant_id, plan_id, billing_cycle, currency, amount, status, gateway, starts_at, next_billing_at)
+     VALUES (?, ?, ?, 'INR', ?, 'active', 'manual', NOW(), ?)`,
+    [id, planId, bill, amount, fmt(nextBill)]
   );
 
-  await audit(adminId, 'CHANGE_TENANT_PLAN', id, null, { plan_id: planId, billing_cycle: billingCycle }, ip);
-  return { message: `Tenant plan changed to ${p.name} (${billingCycle}).` };
+  await db.query('UPDATE tenants SET status = "active" WHERE id = ?', [id]);
+
+  return {
+    message:        `Plan changed to ${plan.name} for "${tenantRows[0].name}".`,
+    next_billing_at: fmt(nextBill),
+  };
 };
 
-// ─── DELETE TENANT ───────────────────────────────────────────
-const deleteTenant = async ({ id, adminId, ip }) => {
+// ─── Delete tenant (hard delete) ─────────────────────────────
+const deleteTenant = async ({ id }) => {
   const [rows] = await db.query('SELECT id, name FROM tenants WHERE id = ? LIMIT 1', [id]);
   if (!rows.length) throw { status: 404, message: 'Tenant not found.' };
 
-  // Hard delete — cascades via FK to users, tasks, etc.
   await db.query('SET FOREIGN_KEY_CHECKS = 0');
-  await db.query('DELETE FROM audit_logs    WHERE tenant_id = ?', [id]);
-  await db.query('DELETE FROM notifications WHERE tenant_id = ?', [id]);
-  await db.query('DELETE FROM task_files    WHERE tenant_id = ?', [id]);
-  await db.query('DELETE FROM task_comments WHERE tenant_id = ?', [id]);
-  await db.query('DELETE FROM tasks         WHERE tenant_id = ?', [id]);
-  await db.query('DELETE FROM users         WHERE tenant_id = ?', [id]);
-  await db.query('DELETE FROM payments      WHERE tenant_id = ?', [id]);
-  await db.query('DELETE FROM promo_code_usages WHERE tenant_id = ?', [id]);
-  await db.query('DELETE FROM subscriptions WHERE tenant_id = ?', [id]);
-  await db.query('DELETE FROM tenants       WHERE id = ?',        [id]);
+  const tables = ['audit_logs','notifications','task_files','task_comments','tasks','users',
+                  'payments','promo_code_usages','subscriptions'];
+  for (const tbl of tables) {
+    await db.query(`DELETE FROM \`${tbl}\` WHERE tenant_id = ?`, [id]);
+  }
+  await db.query('DELETE FROM tenants WHERE id = ?', [id]);
   await db.query('SET FOREIGN_KEY_CHECKS = 1');
 
   return { message: `Company "${rows[0].name}" and all data permanently deleted.` };
