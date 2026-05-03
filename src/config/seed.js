@@ -52,7 +52,7 @@ const seed = async () => {
     // ────────────────────────────────────────────────────
     await connection.query(
       `INSERT INTO super_admins (id, name, email, password, status) VALUES (?, ?, ?, ?, ?)`,
-      [1, 'TalentOps SuperAdmin', 'superadmin@i2speed.com', superAdminPassword, 'active']
+      [1, 'TalentOps SuperAdmin', 'admin@i2speed.in', superAdminPassword, 'active']
     );
     console.log('✅ Seeded: super_admins (1 record)');
 
@@ -459,7 +459,7 @@ const seed = async () => {
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('\n🔐 Login Credentials (Password: Password@123)\n');
     console.log('🌐 SUPER ADMIN (Platform)');
-    console.log('   superadmin@i2speed.com');
+    console.log('   admin@i2speed.in');
     console.log('\n🏢 i2Speed Technologies (Company Tenant)');
     console.log('   👑 Admin        : admin@i2speed.com');
     console.log('   🧑‍💼 Manager      : chanikya@i2speed.com | david@i2speed.com');

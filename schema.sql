@@ -1,14 +1,15 @@
 -- ============================================================
 -- TalentOps — Optimize People. Maximize Performance.
 -- COMPLETE DATABASE SCHEMA (Phase 7 — Multi-Tenant SaaS)
+-- Includes: audit_logs tenant_id backfill fix
 -- Run this in phpMyAdmin / cPanel MySQL
 -- ============================================================
 
-CREATE DATABASE IF NOT EXISTS amcgrvfy_TalentOpsProd
+CREATE DATABASE IF NOT EXISTS amcgrvfy_TalentOpsDev
   CHARACTER SET utf8mb4
   COLLATE utf8mb4_unicode_ci;
 
-USE amcgrvfy_TalentOpsProd;
+USE amcgrvfy_TalentOpsDev;
 
 -- ============================================================
 -- ███████╗ █████╗  █████╗ ███████╗    ██████╗
@@ -298,7 +299,10 @@ CREATE TABLE IF NOT EXISTS notifications (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================
--- TABLE: audit_logs (Updated — added tenant_id)
+-- TABLE: audit_logs (Updated — tenant_id column included)
+-- tenant_id is NULL for platform-level (super admin) actions
+-- For company user actions, tenant_id MUST be populated.
+-- See backfill step below for existing databases.
 -- ============================================================
 CREATE TABLE IF NOT EXISTS audit_logs (
   id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -355,3 +359,27 @@ CREATE INDEX idx_notifications_read    ON notifications(is_read);
 CREATE INDEX idx_audit_tenant          ON audit_logs(tenant_id);
 CREATE INDEX idx_audit_user            ON audit_logs(user_id);
 CREATE INDEX idx_audit_table           ON audit_logs(target_table);
+
+-- ============================================================
+-- POST-CREATION FIX: Backfill audit_logs.tenant_id
+-- ============================================================
+-- For FRESH installs: this runs immediately after table creation.
+--   No existing rows → UPDATE affects 0 rows → safe no-op.
+--
+-- For EXISTING databases (upgrading): this backfills tenant_id
+--   on all audit_log rows that were inserted before tenant_id
+--   was added to the schema. Rows inserted by users whose
+--   tenant_id IS NULL are left as-is (super admin actions).
+-- ============================================================
+UPDATE audit_logs al
+  JOIN users u ON u.id = al.user_id
+  SET al.tenant_id = u.tenant_id
+  WHERE al.tenant_id IS NULL
+    AND u.tenant_id IS NOT NULL;
+
+-- Verify backfill result
+SELECT
+  COUNT(*)                                                    AS total_logs,
+  SUM(CASE WHEN al.tenant_id IS NULL     THEN 1 ELSE 0 END) AS platform_level_logs,
+  SUM(CASE WHEN al.tenant_id IS NOT NULL THEN 1 ELSE 0 END) AS tenant_logs_with_id
+FROM audit_logs al;

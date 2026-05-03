@@ -10,6 +10,8 @@
     "seed": "node src/config/seed.js",
     "setup": "node src/config/schema.js && node src/config/seed.js",
     "reset": "node src/config/reset.js && npm run setup",
+    "setuptest": "node src/config/schema_Test.js && node src/config/seed_Test.js",
+    "resettest": "node src/config/reset.js && npm run setuptest",
     "setupprod": "node src/config/schema_Prod.js && node src/config/seed_Prod.js",
     "resetprod": "node src/config/reset.js && npm run setupprod"
   },

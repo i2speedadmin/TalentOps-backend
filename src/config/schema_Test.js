@@ -1,6 +1,7 @@
 // ============================================================
 // TalentOps — Optimize People. Maximize Performance.
 // COMPLETE DATABASE SCHEMA (Phase 7 — Multi-Tenant SaaS)
+// Includes: audit_logs tenant_id backfill fix
 // Run: node src/config/schema.js
 // ============================================================
 
@@ -326,6 +327,9 @@ const createTables = async () => {
 
     // ──────────────────────────────────────────────────────
     // TABLE: audit_logs
+    // tenant_id is NULL for platform-level super admin actions.
+    // For company users, tenant_id is populated on insert.
+    // The backfill step below handles any existing NULL rows.
     // ──────────────────────────────────────────────────────
     await connection.query(`
       CREATE TABLE IF NOT EXISTS audit_logs (
@@ -403,10 +407,42 @@ const createTables = async () => {
       }
     }
 
+    // ────────────────────────────────────────────────────────
+    // PART 4 — AUDIT LOGS TENANT_ID BACKFILL
+    // ────────────────────────────────────────────────────────
+    // Fresh install:  no rows exist → UPDATE affects 0 rows → safe no-op.
+    // Existing DB:    backfills tenant_id on rows inserted before the
+    //                 multi-tenant migration, using the performing user's
+    //                 tenant_id. Super admin rows (user_type='super_admin')
+    //                 are left as NULL — that is correct behaviour.
+    // ────────────────────────────────────────────────────────
+    console.log('\n📌 Backfilling audit_logs.tenant_id...');
+
+    const [backfill] = await connection.query(`
+      UPDATE audit_logs al
+        JOIN users u ON u.id = al.user_id
+        SET al.tenant_id = u.tenant_id
+        WHERE al.tenant_id IS NULL
+          AND u.tenant_id IS NOT NULL
+    `);
+    console.log(`  ✅ audit_logs backfill complete — ${backfill.affectedRows} rows updated`);
+
+    // Verify
+    const [[summary]] = await connection.query(`
+      SELECT
+        COUNT(*)                                                    AS total_logs,
+        SUM(CASE WHEN al.tenant_id IS NULL     THEN 1 ELSE 0 END) AS platform_level_logs,
+        SUM(CASE WHEN al.tenant_id IS NOT NULL THEN 1 ELSE 0 END) AS tenant_logs_with_id
+      FROM audit_logs al
+    `);
+    console.log(`  📊 Total logs: ${summary.total_logs}`);
+    console.log(`  📊 Tenant logs (with id): ${summary.tenant_logs_with_id}`);
+    console.log(`  📊 Platform-level logs (NULL tenant): ${summary.platform_level_logs}`);
+
     await connection.commit();
 
     console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log(`\n📦 🎉 TalentOps database schema created successfully at  ${process.env.DB_HOST} ${process.env.DB_NAME} !\n`);
+    console.log(`\n📦 🎉 TalentOps database schema created successfully at ${process.env.DB_HOST} ${process.env.DB_NAME}!\n`);
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('📋 Tables created:');
     console.log('   SaaS: super_admins, plans, tenants, subscriptions,');

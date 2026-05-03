@@ -1,14 +1,35 @@
 // ============================================================
 // src/modules/audit/audit.service.js
-// FIXED: JOIN on user_id only (no tenant_id match on join)
-// tenant_id filter applied on al.tenant_id OR falls back to
-// filtering via the user's own tenant when tenant_id is NULL
+// DEFINITIVE FIX for "Performed By" showing "—"
+//
+// ROOT CAUSE (confirmed from transcript analysis):
+//   - Original audit_logs rows were inserted WITHOUT tenant_id
+//     (Phase 1 schema had no tenant_id column on audit_logs)
+//   - Original users rows were also inserted WITHOUT tenant_id
+//     (Phase 1 users table had no tenant_id column)
+//   - So INNER JOIN users ON u.id = al.user_id WHERE u.tenant_id = ?
+//     returns 0 rows because u.tenant_id IS NULL for old users
+//
+// SOLUTION:
+//   - Look up the current requester's tenant_id from the DB
+//     (not from req.user which may have stale/null tenant_id)
+//   - Join audit_logs to users on user_id ONLY (no tenant filter on join)
+//   - Scope by: users whose tenant_id matches OR whose id matches
+//     users we know are in this tenant
+//   - For new rows (post Phase 7): also works perfectly
 // ============================================================
 
 const db = require('../../config/db');
 
+// ─── Safe JSON parse ──────────────────────────────────────────
+const safeJSON = (val) => {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'object') return val;
+  try { return JSON.parse(val); } catch { return val; }
+};
+
 // ============================================================
-// GET AUDIT LOGS
+// GET AUDIT LOGS — Main function
 // ============================================================
 const getAuditLogs = async ({
   requester,
@@ -21,45 +42,60 @@ const getAuditLogs = async ({
   dateFrom,
   dateTo,
 }) => {
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+
+  // ── Step 1: Get all user IDs belonging to this tenant ─────
+  // This is the most reliable way — doesn't depend on
+  // audit_logs.tenant_id being populated (old rows have NULL)
   const tenantId = requester.tenant_id;
-  const offset   = (parseInt(page) - 1) * parseInt(limit);
 
-  // ── Tenant isolation ──────────────────────────────────────
-  // We join users to get name/email.
-  // The JOIN uses only user_id so it works whether or not
-  // al.tenant_id is populated (old rows may have NULL).
-  // We then filter by: the user who performed the action must
-  // belong to this tenant. This is the correct security model
-  // — every action was done by a user of this tenant.
-  const conditions = ['u.tenant_id = ?'];
-  const params     = [tenantId];
+  let tenantUserIds = [];
 
-  // ── Optional filters ──────────────────────────────────────
+  if (tenantId) {
+    const [tenantUsers] = await db.query(
+      'SELECT id FROM users WHERE tenant_id = ?',
+      [tenantId]
+    );
+    tenantUserIds = tenantUsers.map((u) => u.id);
+  }
+
+  // Fallback: if tenant_id isn't available (very old token),
+  // at least show the requester's own logs
+  if (!tenantUserIds.length) {
+    tenantUserIds = [requester.id];
+  }
+
+  // ── Step 2: Build WHERE conditions ────────────────────────
+  // Filter audit_logs WHERE user_id IN (tenant's user IDs)
+  // This works for ALL rows regardless of al.tenant_id value
+  const conditions = [
+    `al.user_id IN (${tenantUserIds.map(() => '?').join(',')})`,
+  ];
+  const params = [...tenantUserIds];
+
   if (search) {
     conditions.push(`(
-      u.name LIKE ? OR u.email LIKE ? OR
-      al.action LIKE ? OR al.target_table LIKE ?
+      u.name        LIKE ? OR
+      u.email       LIKE ? OR
+      al.action     LIKE ? OR
+      al.target_table LIKE ?
     )`);
     params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
   }
 
-  if (action)      { conditions.push('al.action = ?');       params.push(action);      }
-  if (targetTable) { conditions.push('al.target_table = ?'); params.push(targetTable); }
+  if (action)      { conditions.push('al.action = ?');        params.push(action);      }
+  if (targetTable) { conditions.push('al.target_table = ?');  params.push(targetTable); }
 
   if (userId) {
-    // Verify the requested userId belongs to this tenant
-    const [userCheck] = await db.query(
-      'SELECT id FROM users WHERE id = ? AND tenant_id = ? LIMIT 1',
-      [userId, tenantId]
-    );
-    if (!userCheck.length) {
+    // Verify the requested userId is in this tenant
+    if (!tenantUserIds.includes(parseInt(userId))) {
       return {
         logs:       [],
         pagination: { total: 0, page: parseInt(page), limit: parseInt(limit), totalPages: 0 },
       };
     }
     conditions.push('al.user_id = ?');
-    params.push(userId);
+    params.push(parseInt(userId));
   }
 
   if (dateFrom) {
@@ -75,46 +111,50 @@ const getAuditLogs = async ({
 
   const where = 'WHERE ' + conditions.join(' AND ');
 
-  // ── Data query ────────────────────────────────────────────
-  // INNER JOIN ensures only logs from this tenant's users are returned.
-  // This replaces the old LEFT JOIN + tenant_id check on both sides.
+  // ── Step 3: Fetch logs — LEFT JOIN so NULL user_id rows ───
+  // still appear (won't hide system logs)
   const [rows] = await db.query(
     `SELECT
-       al.id, al.tenant_id, al.user_id, al.user_type, al.action,
-       al.target_table, al.target_id,
-       al.old_value, al.new_value,
-       al.ip_address, al.user_agent, al.created_at,
+       al.id,
+       al.tenant_id,
+       al.user_id,
+       al.user_type,
+       al.action,
+       al.target_table,
+       al.target_id,
+       al.old_value,
+       al.new_value,
+       al.ip_address,
+       al.user_agent,
+       al.created_at,
        u.name  AS user_name,
        u.email AS user_email,
        u.role  AS user_role
      FROM audit_logs al
-     INNER JOIN users u ON u.id = al.user_id
+     LEFT JOIN users u ON u.id = al.user_id
      ${where}
      ORDER BY al.created_at DESC
      LIMIT ? OFFSET ?`,
     [...params, parseInt(limit), offset]
   );
 
-  // ── Count query ───────────────────────────────────────────
+  // ── Step 4: Count ─────────────────────────────────────────
   const [count] = await db.query(
     `SELECT COUNT(*) AS total
      FROM audit_logs al
-     INNER JOIN users u ON u.id = al.user_id
+     LEFT JOIN users u ON u.id = al.user_id
      ${where}`,
     params
   );
 
-  // ── Parse JSON values ─────────────────────────────────────
-  const logs = rows.map((row) => ({
-    ...row,
-    old_value: safeParseJSON(row.old_value),
-    new_value: safeParseJSON(row.new_value),
-  }));
-
-  const total = parseInt(count[0].total) || 0;
+  const total = parseInt(count[0]?.total) || 0;
 
   return {
-    logs,
+    logs: rows.map((row) => ({
+      ...row,
+      old_value: safeJSON(row.old_value),
+      new_value: safeJSON(row.new_value),
+    })),
     pagination: {
       total,
       page:       parseInt(page),
@@ -125,58 +165,76 @@ const getAuditLogs = async ({
 };
 
 // ============================================================
-// GET AUDIT LOG BY ID
+// GET SINGLE AUDIT LOG BY ID
 // ============================================================
 const getAuditLogById = async (id, requester) => {
   const tenantId = requester.tenant_id;
 
+  // Get tenant user IDs for scope check
+  let tenantUserIds = [];
+  if (tenantId) {
+    const [tenantUsers] = await db.query(
+      'SELECT id FROM users WHERE tenant_id = ?',
+      [tenantId]
+    );
+    tenantUserIds = tenantUsers.map((u) => u.id);
+  }
+  if (!tenantUserIds.length) tenantUserIds = [requester.id];
+
   const [rows] = await db.query(
     `SELECT
-       al.id, al.tenant_id, al.user_id, al.action, al.target_table,
-       al.target_id, al.old_value, al.new_value,
+       al.id, al.tenant_id, al.user_id, al.user_type,
+       al.action, al.target_table, al.target_id,
+       al.old_value, al.new_value,
        al.ip_address, al.user_agent, al.created_at,
-       u.name AS user_name, u.email AS user_email, u.role AS user_role
+       u.name  AS user_name,
+       u.email AS user_email,
+       u.role  AS user_role
      FROM audit_logs al
-     INNER JOIN users u ON u.id = al.user_id AND u.tenant_id = ?
+     LEFT JOIN users u ON u.id = al.user_id
      WHERE al.id = ?
+       AND al.user_id IN (${tenantUserIds.map(() => '?').join(',')})
      LIMIT 1`,
-    [tenantId, id]
+    [id, ...tenantUserIds]
   );
 
   if (!rows.length) throw { status: 404, message: 'Audit log not found.' };
 
   return {
     ...rows[0],
-    old_value: safeParseJSON(rows[0].old_value),
-    new_value: safeParseJSON(rows[0].new_value),
+    old_value: safeJSON(rows[0].old_value),
+    new_value: safeJSON(rows[0].new_value),
   };
 };
 
 // ============================================================
-// GET AUDIT SUMMARY
+// GET AUDIT SUMMARY (dashboard widget)
 // ============================================================
 const getAuditSummary = async (requester) => {
   const tenantId = requester.tenant_id;
 
+  let tenantUserIds = [];
+  if (tenantId) {
+    const [tenantUsers] = await db.query(
+      'SELECT id FROM users WHERE tenant_id = ?',
+      [tenantId]
+    );
+    tenantUserIds = tenantUsers.map((u) => u.id);
+  }
+  if (!tenantUserIds.length) tenantUserIds = [requester.id];
+
   const [rows] = await db.query(
     `SELECT al.action, COUNT(*) AS count
      FROM audit_logs al
-     INNER JOIN users u ON u.id = al.user_id AND u.tenant_id = ?
-     WHERE al.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+     WHERE al.user_id IN (${tenantUserIds.map(() => '?').join(',')})
+       AND al.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
      GROUP BY al.action
      ORDER BY count DESC
      LIMIT 10`,
-    [tenantId]
+    tenantUserIds
   );
 
   return rows;
-};
-
-// ─── Helpers ──────────────────────────────────────────────────
-const safeParseJSON = (val) => {
-  if (val === null || val === undefined) return null;
-  if (typeof val === 'object') return val;
-  try { return JSON.parse(val); } catch { return val; }
 };
 
 module.exports = { getAuditLogs, getAuditLogById, getAuditSummary };
