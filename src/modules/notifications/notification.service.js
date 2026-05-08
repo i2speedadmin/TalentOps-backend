@@ -1,66 +1,53 @@
 // ============================================================
 // src/modules/notifications/notification.service.js
+// FIXED: all queries scoped to tenant_id
 // ============================================================
 
 const db = require('../../config/db');
 
-// ============================================================
-// GET ALL NOTIFICATIONS FOR USER
-// ============================================================
-const getNotifications = async ({ userId, tenantId, page = 1, limit = 20, unreadOnly = false }) => {
-  const offset  = (page - 1) * limit;
-  const where   = unreadOnly
-    ? 'WHERE n.tenant_id = ? AND n.user_id = ? AND n.is_read = 0'
-    : 'WHERE n.tenant_id = ? AND n.user_id = ?';
+const getNotifications = async ({ userId, tenantId, page = 1, limit = 15, unreadOnly = false }) => {
+  const offset = (parseInt(page) - 1) * parseInt(limit);
+  const filter = (unreadOnly === 'true' || unreadOnly === true) ? 'AND n.is_read = 0' : '';
 
   const [rows] = await db.query(
     `SELECT n.id, n.title, n.message, n.type, n.ref_id, n.is_read, n.created_at
      FROM notifications n
-     ${where}
-     ORDER BY n.created_at DESC
-     LIMIT ? OFFSET ?`,
-    [tenantId, userId, parseInt(limit), parseInt(offset)]
+     WHERE n.user_id = ? AND n.tenant_id = ? ${filter}
+     ORDER BY n.created_at DESC LIMIT ? OFFSET ?`,
+    [userId, tenantId, parseInt(limit), offset]
   );
 
   const [count] = await db.query(
-    `SELECT COUNT(*) AS total FROM notifications n ${where}`,
-    [tenantId, userId]
+    `SELECT COUNT(*) AS total FROM notifications WHERE user_id = ? AND tenant_id = ? ${filter}`,
+    [userId, tenantId]
   );
 
   const [unread] = await db.query(
-    `SELECT COUNT(*) AS count FROM notifications WHERE tenant_id = ? AND user_id = ? AND is_read = 0`,
-    [tenantId, userId]
+    `SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND tenant_id = ? AND is_read = 0`,
+    [userId, tenantId]
   );
 
-  const totalCount  = parseInt(count[0].total)  || 0;
-  const unreadTotal = parseInt(unread[0].count) || 0;
   return {
     notifications: rows,
     pagination: {
-      total:      totalCount,
+      total:      parseInt(count[0].total) || 0,
       page:       parseInt(page),
       limit:      parseInt(limit),
-      totalPages: Math.ceil(totalCount / limit),
+      totalPages: Math.ceil((parseInt(count[0].total) || 0) / parseInt(limit)),
     },
-    unreadCount: unreadTotal,
+    unreadCount: parseInt(unread[0].count) || 0,
   };
 };
 
-// ============================================================
-// GET UNREAD COUNT
-// ============================================================
-const getUnreadCount = async (userId, tenantId) => {
+const getUnreadCount = async ({ userId, tenantId }) => {
   const [rows] = await db.query(
-    `SELECT COUNT(*) AS count FROM notifications WHERE tenant_id = ? AND user_id = ? AND is_read = 0`,
-    [tenantId, userId]
+    `SELECT COUNT(*) AS count FROM notifications WHERE user_id = ? AND tenant_id = ? AND is_read = 0`,
+    [userId, tenantId]
   );
   return parseInt(rows[0].count) || 0;
 };
 
-// ============================================================
-// MARK ONE AS READ
-// ============================================================
-const markAsRead = async (notificationId, userId, tenantId) => {
+const markAsRead = async ({ notificationId, userId, tenantId }) => {
   const [rows] = await db.query(
     'SELECT id FROM notifications WHERE id = ? AND user_id = ? AND tenant_id = ? LIMIT 1',
     [notificationId, userId, tenantId]
@@ -68,58 +55,42 @@ const markAsRead = async (notificationId, userId, tenantId) => {
   if (!rows.length) throw { status: 404, message: 'Notification not found.' };
 
   await db.query(
-    'UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?',
-    [notificationId, userId]
+    'UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ? AND tenant_id = ?',
+    [notificationId, userId, tenantId]
   );
 
-  const unreadCount = parseInt(await getUnreadCount(userId, tenantId)) || 0;
+  const unreadCount = await getUnreadCount({ userId, tenantId });
   return { unreadCount };
 };
 
-// ============================================================
-// MARK ALL AS READ
-// ============================================================
-const markAllAsRead = async (userId, tenantId) => {
-  await db.query(
-    'UPDATE notifications SET is_read = 1 WHERE tenant_id = ? AND user_id = ? AND is_read = 0',
-    [tenantId, userId]
+const markAllAsRead = async ({ userId, tenantId }) => {
+  const [result] = await db.query(
+    'UPDATE notifications SET is_read = 1 WHERE user_id = ? AND tenant_id = ? AND is_read = 0',
+    [userId, tenantId]
   );
-  return { message: 'All notifications marked as read.', unreadCount: 0 };
+  return { message: 'All notifications marked as read.', unreadCount: 0, updated: result.affectedRows };
 };
 
-// ============================================================
-// DELETE ONE NOTIFICATION
-// ============================================================
-const deleteNotification = async (notificationId, userId) => {
+const deleteNotification = async ({ notificationId, userId, tenantId }) => {
   const [rows] = await db.query(
-    'SELECT id FROM notifications WHERE id = ? AND user_id = ? LIMIT 1',
-    [notificationId, userId]
+    'SELECT id FROM notifications WHERE id = ? AND user_id = ? AND tenant_id = ? LIMIT 1',
+    [notificationId, userId, tenantId]
   );
   if (!rows.length) throw { status: 404, message: 'Notification not found.' };
 
-  await db.query('DELETE FROM notifications WHERE id = ?', [notificationId]);
+  await db.query('DELETE FROM notifications WHERE id = ? AND user_id = ? AND tenant_id = ?', [notificationId, userId, tenantId]);
   return { message: 'Notification deleted.' };
 };
 
-// ============================================================
-// CLEAR ALL READ NOTIFICATIONS
-// ============================================================
-const clearReadNotifications = async (userId, tenantId) => {
+const clearReadNotifications = async ({ userId, tenantId }) => {
   const [result] = await db.query(
-    'DELETE FROM notifications WHERE tenant_id = ? AND user_id = ? AND is_read = 1',
-    [tenantId, userId]
+    'DELETE FROM notifications WHERE user_id = ? AND tenant_id = ? AND is_read = 1',
+    [userId, tenantId]
   );
-  return {
-    message: `${result.affectedRows} read notification(s) cleared.`,
-    deleted: result.affectedRows,
-  };
+  return { message: `${result.affectedRows} read notification(s) cleared.`, deleted: result.affectedRows };
 };
 
 module.exports = {
-  getNotifications,
-  getUnreadCount,
-  markAsRead,
-  markAllAsRead,
-  deleteNotification,
-  clearReadNotifications,
+  getNotifications, getUnreadCount, markAsRead,
+  markAllAsRead, deleteNotification, clearReadNotifications,
 };

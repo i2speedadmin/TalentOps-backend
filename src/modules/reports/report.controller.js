@@ -59,4 +59,10 @@ const globalSearch = async (req, res) => {
   }
 };
 
-module.exports = { getOverviewStats, getTaskTrend, getTeamPerformance, getPriorityBreakdown, globalSearch };
+module.exports = {
+  getOverviewStats,
+  getTaskTrend,
+  getTeamPerformance,
+  getPriorityBreakdown,
+  globalSearch,
+};

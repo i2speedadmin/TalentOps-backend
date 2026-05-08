@@ -1,16 +1,21 @@
 // ============================================================
 // src/modules/subscriptions/subscription.service.js
-// Handles: upgrade/downgrade, renewal, plan info for company admin
+// FIXED:
+//   1. cycleDays calculated from actual starts_at→next_billing_at
+//      (not hardcoded 30 days)
+//   2. changePlan now creates payment order first, applies only
+//      after payment is verified (completePlanChange)
 // ============================================================
 
-const db = require('../../config/db');
+const crypto = require('crypto');
+const db     = require('../../config/db');
 const {
   sendRenewalReminderEmail,
   sendSubscriptionExpiredEmail,
   sendPlanChangeEmail,
 } = require('../auth/email.service');
 
-const APP_URL = process.env.CLIENT_URL || 'https://i2speed.in';
+const APP_URL = process.env.CLIENT_URL || 'https://talentops.i2speed.com';
 
 // ─── Audit ───────────────────────────────────────────────────
 const audit = (userId, tenantId, action, targetId, oldVal, newVal, ip) =>
@@ -24,7 +29,21 @@ const audit = (userId, tenantId, action, targetId, oldVal, newVal, ip) =>
      ip || null]
   ).catch(() => {});
 
-// ─── Get current subscription for a tenant ───────────────────
+// ─── Get platform setting ─────────────────────────────────────
+const getSetting = async (key, defaultVal) => {
+  const [rows] = await db.query(
+    'SELECT setting_value FROM platform_settings WHERE setting_key = ? LIMIT 1',
+    [key]
+  );
+  if (!rows.length) return defaultVal;
+  const v = rows[0].setting_value;
+  if (v === 'true')  return true;
+  if (v === 'false') return false;
+  if (!isNaN(v))     return Number(v);
+  return v ?? defaultVal;
+};
+
+// ─── Get current subscription ─────────────────────────────────
 const getCurrentSubscription = async (tenantId) => {
   const [rows] = await db.query(
     `SELECT s.*, p.name AS plan_name, p.slug AS plan_slug,
@@ -42,7 +61,7 @@ const getCurrentSubscription = async (tenantId) => {
   return rows[0] || null;
 };
 
-// ─── Get company admin user ───────────────────────────────────
+// ─── Get admin user ───────────────────────────────────────────
 const getAdminUser = async (tenantId) => {
   const [rows] = await db.query(
     `SELECT id, name, email FROM users WHERE tenant_id = ? AND role = 'admin' LIMIT 1`,
@@ -51,48 +70,106 @@ const getAdminUser = async (tenantId) => {
   return rows[0] || null;
 };
 
-// ─── Get subscription + plan info for company admin dashboard ─
+// ─── Format date for MySQL ────────────────────────────────────
+const fmt = (d) => new Date(d).toISOString().slice(0, 19).replace('T', ' ');
+
+// ============================================================
+// CALCULATE PRORATION
+// FIXED: uses actual cycle days (starts_at → next_billing_at)
+// instead of hardcoded 30 or 365
+// ============================================================
+const calculateProration = ({ currentAmount, newAmount, startsAt, nextBillingAt }) => {
+  if (!nextBillingAt) return {
+    days_left_in_cycle: 0, days_used: 0, days_in_cycle: 0,
+    credit_amount: 0, charge_amount: Math.round(newAmount * 100) / 100,
+    proration: Math.round(newAmount * 100) / 100,
+    final_charge: Math.round(newAmount * 100) / 100,
+    is_upgrade: newAmount > currentAmount,
+  };
+
+  const now         = new Date();
+  const renewalDate = new Date(nextBillingAt);
+  const startDate   = startsAt ? new Date(startsAt) : new Date(renewalDate.getFullYear(), renewalDate.getMonth() - 1, renewalDate.getDate());
+
+  // Actual cycle length in days
+  const cycleDays = Math.max(1, Math.ceil((renewalDate - startDate) / 86400000));
+  const daysLeft  = Math.max(0, Math.ceil((renewalDate - now) / 86400000));
+  const daysUsed  = cycleDays - daysLeft;
+
+  // Daily rates
+  const dailyCurrent  = currentAmount / cycleDays;
+  const dailyNew      = newAmount     / cycleDays;
+
+  // Credit = what you've already paid but haven't used
+  const creditAmount  = Math.round(dailyCurrent * daysLeft * 100) / 100;
+
+  // Charge = what you owe for remaining days on new plan
+  const chargeAmount  = Math.round(dailyNew * daysLeft * 100) / 100;
+
+  const proration    = Math.round((chargeAmount - creditAmount) * 100) / 100;
+  const finalCharge  = Math.max(0, proration);
+
+  return {
+    days_in_cycle:      cycleDays,
+    days_left_in_cycle: daysLeft,
+    days_used:          daysUsed,
+    credit_amount:      creditAmount,
+    charge_amount:      chargeAmount,
+    proration,
+    final_charge:       finalCharge,
+    is_upgrade:         newAmount > currentAmount,
+  };
+};
+
+// ============================================================
+// GET MY SUBSCRIPTION (for company admin dashboard)
+// ============================================================
 const getMySubscription = async (tenantId) => {
   const sub = await getCurrentSubscription(tenantId);
   if (!sub) return null;
 
-  // All available plans for upgrade/downgrade
   const [plans] = await db.query(
     'SELECT * FROM plans WHERE is_active = 1 ORDER BY sort_order ASC'
   );
 
-  // Days until next billing
   const daysLeft = sub.next_billing_at
     ? Math.ceil((new Date(sub.next_billing_at) - new Date()) / 86400000)
     : null;
 
+  const startsAt     = sub.starts_at;
+  const nextBilling  = sub.next_billing_at;
+  const cycleDays    = (startsAt && nextBilling)
+    ? Math.max(1, Math.ceil((new Date(nextBilling) - new Date(startsAt)) / 86400000))
+    : (sub.billing_cycle === 'annual' ? 365 : 30);
+
   return {
     subscription: {
-      id:             sub.id,
-      status:         sub.status,
-      plan_id:        sub.plan_id,
-      plan_name:      sub.plan_name,
-      plan_slug:      sub.plan_slug,
-      billing_cycle:  sub.billing_cycle,
-      currency:       sub.currency,
-      amount:         parseFloat(sub.amount),
-      discount_amount: parseFloat(sub.discount_amount || 0),
-      starts_at:      sub.starts_at,
-      ends_at:        sub.ends_at,
-      next_billing_at: sub.next_billing_at,
-      cancelled_at:   sub.cancelled_at,
+      id:               sub.id,
+      status:           sub.status,
+      plan_id:          sub.plan_id,
+      plan_name:        sub.plan_name,
+      plan_slug:        sub.plan_slug,
+      billing_cycle:    sub.billing_cycle,
+      currency:         sub.currency,
+      amount:           parseFloat(sub.amount),
+      discount_amount:  parseFloat(sub.discount_amount || 0),
+      starts_at:        sub.starts_at,
+      ends_at:          sub.ends_at,
+      next_billing_at:  sub.next_billing_at,
+      cancelled_at:     sub.cancelled_at,
+      days_in_cycle:    cycleDays,
       days_until_renewal: daysLeft,
-      features:       typeof sub.features === 'string' ? JSON.parse(sub.features) : (sub.features || []),
-      max_users:      sub.max_users,
-      max_tasks:      sub.max_tasks,
-      max_storage_gb: sub.max_storage_gb,
+      features:         typeof sub.features === 'string' ? JSON.parse(sub.features) : (sub.features || []),
+      max_users:        sub.max_users,
+      max_tasks:        sub.max_tasks,
+      max_storage_gb:   sub.max_storage_gb,
     },
     available_plans: plans.map((p) => ({
-      id:               p.id,
-      name:             p.name,
-      slug:             p.slug,
-      description:      p.description,
-      is_popular:       p.is_popular,
+      id:                p.id,
+      name:              p.name,
+      slug:              p.slug,
+      description:       p.description,
+      is_popular:        p.is_popular,
       price_monthly_inr: parseFloat(p.price_monthly_inr),
       price_annual_inr:  parseFloat(p.price_annual_inr),
       price_monthly_usd: parseFloat(p.price_monthly_usd),
@@ -105,39 +182,9 @@ const getMySubscription = async (tenantId) => {
   };
 };
 
-// ─── Calculate prorated amount for plan change ────────────────
-const calculateProration = ({ currentAmount, newAmount, billingCycle, nextBillingAt }) => {
-  if (!nextBillingAt) return { proration: 0, finalCharge: newAmount };
-
-  const now         = new Date();
-  const renewalDate = new Date(nextBillingAt);
-  const cycleDays   = billingCycle === 'annual' ? 365 : 30;
-  const daysLeft    = Math.max(0, Math.ceil((renewalDate - now) / 86400000));
-  const daysUsed    = cycleDays - daysLeft;
-
-  // Credit for unused days on current plan
-  const dailyCurrent = currentAmount / cycleDays;
-  const creditAmount = dailyCurrent * daysLeft;
-
-  // Charge for remaining days on new plan
-  const dailyNew     = newAmount / cycleDays;
-  const chargeAmount = dailyNew * daysLeft;
-
-  const proration    = chargeAmount - creditAmount; // positive = pay more, negative = credit
-  const finalCharge  = Math.max(0, Math.round(proration * 100) / 100); // round to 2dp, never negative
-
-  return {
-    days_left_in_cycle: daysLeft,
-    days_used:          daysUsed,
-    credit_amount:      Math.round(creditAmount * 100) / 100,
-    charge_amount:      Math.round(chargeAmount * 100) / 100,
-    proration:          Math.round(proration * 100) / 100,
-    final_charge:       finalCharge,
-    is_upgrade:         newAmount > currentAmount,
-  };
-};
-
-// ─── Preview plan change (no DB write) ───────────────────────
+// ============================================================
+// PREVIEW PLAN CHANGE (no DB write — just calculate cost)
+// ============================================================
 const previewPlanChange = async ({ tenantId, newPlanId, newBillingCycle, currency }) => {
   const sub = await getCurrentSubscription(tenantId);
   if (!sub) throw { status: 404, message: 'No active subscription found.' };
@@ -150,41 +197,160 @@ const previewPlanChange = async ({ tenantId, newPlanId, newBillingCycle, currenc
   const newPlan = planRows[0];
 
   const useCurrency = currency || sub.currency;
+  const billCycle   = newBillingCycle || sub.billing_cycle;
   const newAmount   = useCurrency === 'USD'
-    ? parseFloat(newBillingCycle === 'annual' ? newPlan.price_annual_usd : newPlan.price_monthly_usd)
-    : parseFloat(newBillingCycle === 'annual' ? newPlan.price_annual_inr : newPlan.price_monthly_inr);
+    ? parseFloat(billCycle === 'annual' ? newPlan.price_annual_usd  : newPlan.price_monthly_usd)
+    : parseFloat(billCycle === 'annual' ? newPlan.price_annual_inr  : newPlan.price_monthly_inr);
 
   const proration = calculateProration({
     currentAmount:  parseFloat(sub.amount),
     newAmount,
-    billingCycle:   sub.billing_cycle,
+    startsAt:       sub.starts_at,
     nextBillingAt:  sub.next_billing_at,
   });
 
   return {
-    current_plan:  { id: sub.plan_id, name: sub.plan_name, amount: parseFloat(sub.amount), billing_cycle: sub.billing_cycle },
-    new_plan:      { id: newPlan.id,   name: newPlan.name,  amount: newAmount, billing_cycle: newBillingCycle || sub.billing_cycle },
-    currency:      useCurrency,
+    current_plan:    { id: sub.plan_id, name: sub.plan_name, amount: parseFloat(sub.amount), billing_cycle: sub.billing_cycle },
+    new_plan:        { id: newPlan.id,  name: newPlan.name,  amount: newAmount, billing_cycle: billCycle },
+    currency:        useCurrency,
     proration,
+    starts_at:       sub.starts_at,
     next_billing_at: sub.next_billing_at,
-    effective:     'immediate',
   };
 };
 
-// ─── Execute plan change ──────────────────────────────────────
-const changePlan = async ({ tenantId, userId, newPlanId, newBillingCycle, currency, ip }) => {
+// ============================================================
+// INITIATE PLAN CHANGE — creates payment order (NO DB change)
+// Returns Razorpay order or Stripe session to pay the proration
+// ============================================================
+const initiatePlanChange = async ({ tenantId, newPlanId, newBillingCycle, currency }) => {
   const sub = await getCurrentSubscription(tenantId);
   if (!sub) throw { status: 404, message: 'No active subscription found.' };
 
-  const [planRows] = await db.query(
-    'SELECT * FROM plans WHERE id = ? AND is_active = 1 LIMIT 1',
-    [newPlanId]
-  );
+  const [planRows] = await db.query('SELECT * FROM plans WHERE id = ? AND is_active = 1 LIMIT 1', [newPlanId]);
   if (!planRows.length) throw { status: 404, message: 'Plan not found.' };
   const newPlan = planRows[0];
 
+  const useCurrency = currency    || sub.currency;
   const billCycle   = newBillingCycle || sub.billing_cycle;
+  const newAmount   = useCurrency === 'USD'
+    ? parseFloat(billCycle === 'annual' ? newPlan.price_annual_usd  : newPlan.price_monthly_usd)
+    : parseFloat(billCycle === 'annual' ? newPlan.price_annual_inr  : newPlan.price_monthly_inr);
+
+  const proration = calculateProration({
+    currentAmount: parseFloat(sub.amount),
+    newAmount,
+    startsAt:      sub.starts_at,
+    nextBillingAt: sub.next_billing_at,
+  });
+
+  const dueAmount = proration.final_charge;
+
+  // If no payment needed (downgrade / same price) — apply immediately
+  if (dueAmount <= 0) {
+    await applyPlanChange({ tenantId, sub, newPlan, billCycle, newAmount, useCurrency, gateway: 'manual', proration });
+    return { payment_required: false, message: `Plan changed to ${newPlan.name} immediately (no charge).` };
+  }
+
+  // Payment required — create Razorpay order
+  const razorpayEnabled = await getSetting('razorpay_enabled', false);
+  const stripeEnabled   = await getSetting('stripe_enabled', false);
+
+  if (razorpayEnabled) {
+    const keyId     = await getSetting('razorpay_key_id', '');
+    const keySecret = await getSetting('razorpay_key_secret', '');
+    if (keyId && keySecret) {
+      const Razorpay = require('razorpay');
+      const rzp      = new Razorpay({ key_id: keyId, key_secret: keySecret });
+      const rzpAmt   = useCurrency === 'USD' ? Math.round(dueAmount * 84 * 100) : Math.round(dueAmount * 100);
+
+      const order = await rzp.orders.create({
+        amount:   rzpAmt,
+        currency: 'INR',
+        receipt:  `plan_chg_${tenantId}_${Date.now()}`,
+        notes:    {
+          tenant_id:    tenantId,
+          new_plan_id:  newPlanId,
+          billing_cycle: billCycle,
+          new_amount:    newAmount,
+          currency:      useCurrency,
+          type:          'plan_upgrade',
+        },
+      });
+
+      return {
+        payment_required: true,
+        gateway:          'razorpay',
+        order_id:         order.id,
+        key_id:           keyId,
+        amount:           order.amount,
+        currency:         'INR',
+        proration,
+        new_plan:         { id: newPlan.id, name: newPlan.name, amount: newAmount },
+        description:      `Upgrade to ${newPlan.name} (${billCycle})`,
+      };
+    }
+  }
+
+  if (stripeEnabled) {
+    const stripeKey = await getSetting('stripe_secret_key', '');
+    if (stripeKey) {
+      const stripe  = require('stripe')(stripeKey);
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: [{
+          price_data: {
+            currency:     useCurrency.toLowerCase(),
+            unit_amount:  Math.round(dueAmount * 100),
+            product_data: { name: `Upgrade to ${newPlan.name}`, description: `Proration for ${billCycle} plan` },
+          },
+          quantity: 1,
+        }],
+        mode:        'payment',
+        success_url: `${APP_URL}/subscription?plan_change=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url:  `${APP_URL}/subscription`,
+        metadata:    {
+          tenant_id:     String(tenantId),
+          new_plan_id:   String(newPlanId),
+          billing_cycle: billCycle,
+          new_amount:    String(newAmount),
+          currency:      useCurrency,
+          type:          'plan_upgrade',
+        },
+      });
+
+      return {
+        payment_required: true,
+        gateway:          'stripe',
+        session_id:       session.id,
+        session_url:      session.url,
+        proration,
+        new_plan:         { id: newPlan.id, name: newPlan.name, amount: newAmount },
+      };
+    }
+  }
+
+  throw { status: 503, message: 'No payment gateway configured. Please contact support.' };
+};
+
+// ============================================================
+// COMPLETE PLAN CHANGE — called after payment verified
+// ============================================================
+const completePlanChange = async ({
+  tenantId, userId,
+  gateway, gatewayOrderId, gatewayPaymentId, gatewaySignature,
+  stripeSessionId,
+  newPlanId, newBillingCycle, currency, ip,
+}) => {
+  const sub = await getCurrentSubscription(tenantId);
+  if (!sub) throw { status: 404, message: 'No active subscription found.' };
+
+  const [planRows] = await db.query('SELECT * FROM plans WHERE id = ? AND is_active = 1 LIMIT 1', [newPlanId]);
+  if (!planRows.length) throw { status: 404, message: 'Plan not found.' };
+  const newPlan = planRows[0];
+
   const useCurrency = currency        || sub.currency;
+  const billCycle   = newBillingCycle || sub.billing_cycle;
   const newAmount   = useCurrency === 'USD'
     ? parseFloat(billCycle === 'annual' ? newPlan.price_annual_usd : newPlan.price_monthly_usd)
     : parseFloat(billCycle === 'annual' ? newPlan.price_annual_inr : newPlan.price_monthly_inr);
@@ -192,198 +358,195 @@ const changePlan = async ({ tenantId, userId, newPlanId, newBillingCycle, curren
   const proration = calculateProration({
     currentAmount: parseFloat(sub.amount),
     newAmount,
-    billingCycle:  sub.billing_cycle,
+    startsAt:      sub.starts_at,
     nextBillingAt: sub.next_billing_at,
   });
 
-  // Calculate new next_billing_at from now
+  // Verify Razorpay
+  if (gateway === 'razorpay') {
+    const keySecret = await getSetting('razorpay_key_secret', '');
+    const expected  = crypto
+      .createHmac('sha256', keySecret)
+      .update(`${gatewayOrderId}|${gatewayPaymentId}`)
+      .digest('hex');
+    if (expected !== gatewaySignature) throw { status: 400, message: 'Payment verification failed.' };
+  }
+
+  // Verify Stripe
+  if (gateway === 'stripe') {
+    const stripeKey = await getSetting('stripe_secret_key', '');
+    const stripe    = require('stripe')(stripeKey);
+    const session   = await stripe.checkout.sessions.retrieve(stripeSessionId);
+    if (session.payment_status !== 'paid') throw { status: 400, message: 'Payment not completed.' };
+  }
+
+  // Apply plan change
+  const result = await applyPlanChange({ tenantId, sub, newPlan, billCycle, newAmount, useCurrency, gateway, proration, userId });
+
+  // Record payment
+  if (proration.final_charge > 0) {
+    const [subs] = await db.query('SELECT id FROM subscriptions WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 1', [tenantId]);
+    if (subs.length) {
+      await db.query(
+        `INSERT INTO payments
+           (tenant_id, subscription_id, gateway, gateway_order_id, gateway_payment_id, gateway_signature, amount, currency, status, description, paid_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'paid', ?, NOW())`,
+        [tenantId, subs[0].id, gateway,
+         gatewayOrderId || stripeSessionId || null,
+         gatewayPaymentId || null,
+         gatewaySignature || null,
+         proration.final_charge, useCurrency,
+         `Plan upgrade to ${newPlan.name}`]
+      );
+    }
+  }
+
+  if (userId) await audit(userId, tenantId, 'CHANGE_PLAN', sub.id,
+    { plan_id: sub.plan_id, amount: sub.amount },
+    { plan_id: newPlanId, amount: newAmount }, ip);
+
+  // Send email
+  const admin = await getAdminUser(tenantId);
+  if (admin) {
+    sendPlanChangeEmail({
+      to: admin.email, name: admin.name, companyName: sub.tenant_name,
+      oldPlan: sub.plan_name, newPlan: newPlan.name,
+      amount: newAmount, currency: useCurrency, billingCycle: billCycle,
+      effectiveDate: new Date(),
+    }).catch(() => {});
+  }
+
+  return {
+    message:     `Successfully upgraded to ${newPlan.name} (${billCycle}).`,
+    new_plan:    newPlan.name,
+    new_amount:  newAmount,
+    currency:    useCurrency,
+    next_billing_at: result.next_billing_at,
+  };
+};
+
+// ─── Internal: apply the plan swap in DB ──────────────────────
+const applyPlanChange = async ({ tenantId, sub, newPlan, billCycle, newAmount, useCurrency, gateway, proration, userId }) => {
+  // Cancel current subscription
+  await db.query(
+    `UPDATE subscriptions SET status = 'cancelled', cancelled_at = NOW(), cancellation_reason = 'Plan changed'
+     WHERE id = ?`,
+    [sub.id]
+  );
+
+  // New next_billing from now
   const now      = new Date();
   const nextBill = new Date(now);
   billCycle === 'annual'
     ? nextBill.setFullYear(nextBill.getFullYear() + 1)
     : nextBill.setMonth(nextBill.getMonth() + 1);
 
-  const fmt = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
-
-  // Cancel current subscription
   await db.query(
-    `UPDATE subscriptions
-     SET status = 'cancelled', cancelled_at = NOW(), cancellation_reason = 'Plan changed by user'
-     WHERE id = ?`,
-    [sub.id]
-  );
-
-  // Create new subscription
-  const [newSub] = await db.query(
     `INSERT INTO subscriptions
-       (tenant_id, plan_id, billing_cycle, currency, amount, discount_amount,
-        status, gateway, starts_at, next_billing_at)
+       (tenant_id, plan_id, billing_cycle, currency, amount, discount_amount, status, gateway, starts_at, next_billing_at)
      VALUES (?, ?, ?, ?, ?, 0, 'active', ?, NOW(), ?)`,
-    [tenantId, newPlanId, billCycle, useCurrency, newAmount, sub.gateway, fmt(nextBill)]
+    [tenantId, newPlan.id, billCycle, useCurrency, newAmount, gateway, fmt(nextBill)]
   );
 
-  await audit(userId, tenantId, 'CHANGE_PLAN', newSub.insertId,
-    { plan_id: sub.plan_id, amount: sub.amount, billing_cycle: sub.billing_cycle },
-    { plan_id: newPlanId,   amount: newAmount,   billing_cycle: billCycle }, ip);
+  // Ensure tenant is active
+  await db.query(`UPDATE tenants SET status = 'active' WHERE id = ?`, [tenantId]);
 
-  // Send plan change email
-  const admin = await getAdminUser(tenantId);
-  if (admin) {
-    sendPlanChangeEmail({
-      to:           admin.email,
-      name:         admin.name,
-      companyName:  sub.tenant_name,
-      oldPlan:      sub.plan_name,
-      newPlan:      newPlan.name,
-      amount:       newAmount,
-      currency:     useCurrency,
-      billingCycle: billCycle,
-      effectiveDate: new Date(),
-    }).catch(() => {});
-  }
-
-  return {
-    message:      `Plan changed to ${newPlan.name} (${billCycle}) successfully.`,
-    new_plan:     newPlan.name,
-    new_amount:   newAmount,
-    currency:     useCurrency,
-    proration,
-    next_billing_at: fmt(nextBill),
-  };
+  return { next_billing_at: fmt(nextBill) };
 };
 
-// ─── Renew subscription (extend next_billing_at by 1 cycle) ───
+// ============================================================
+// RENEW SUBSCRIPTION
+// ============================================================
 const renewSubscription = async ({ tenantId, userId, gateway, gatewayPaymentId, ip }) => {
   const sub = await getCurrentSubscription(tenantId);
   if (!sub) throw { status: 404, message: 'No active subscription found.' };
 
-  const current   = sub.next_billing_at ? new Date(sub.next_billing_at) : new Date();
-  const nextBill  = new Date(current);
+  const current  = sub.next_billing_at ? new Date(sub.next_billing_at) : new Date();
+  const nextBill = new Date(current);
   sub.billing_cycle === 'annual'
     ? nextBill.setFullYear(nextBill.getFullYear() + 1)
     : nextBill.setMonth(nextBill.getMonth() + 1);
 
-  const fmt = (d) => d.toISOString().slice(0, 19).replace('T', ' ');
-
   await db.query(
-    `UPDATE subscriptions
-     SET status = 'active', next_billing_at = ?, ends_at = NULL
-     WHERE id = ?`,
+    `UPDATE subscriptions SET status = 'active', next_billing_at = ?, ends_at = NULL WHERE id = ?`,
     [fmt(nextBill), sub.id]
   );
 
-  // Record renewal payment
   if (gatewayPaymentId) {
     await db.query(
-      `INSERT INTO payments
-         (tenant_id, subscription_id, gateway, gateway_payment_id, amount, currency, status, description, paid_at)
+      `INSERT INTO payments (tenant_id, subscription_id, gateway, gateway_payment_id, amount, currency, status, description, paid_at)
        VALUES (?, ?, ?, ?, ?, ?, 'paid', 'Subscription Renewal', NOW())`,
-      [tenantId, sub.id, gateway || 'manual', gatewayPaymentId,
-       sub.amount, sub.currency]
+      [tenantId, sub.id, gateway || 'manual', gatewayPaymentId, sub.amount, sub.currency]
     );
   }
 
-  // Update tenant status to active if it was past_due
-  await db.query(
-    `UPDATE tenants SET status = 'active' WHERE id = ? AND status IN ('trial','suspended')`,
-    [tenantId]
-  );
+  await db.query(`UPDATE tenants SET status = 'active' WHERE id = ? AND status IN ('trial','suspended')`, [tenantId]);
 
-  await audit(userId, tenantId, 'RENEW_SUBSCRIPTION', sub.id,
-    { next_billing_at: sub.next_billing_at },
-    { next_billing_at: fmt(nextBill) }, ip);
+  if (userId) await audit(userId, tenantId, 'RENEW_SUBSCRIPTION', sub.id,
+    { next_billing_at: sub.next_billing_at }, { next_billing_at: fmt(nextBill) }, ip);
 
   return {
-    message:        'Subscription renewed successfully.',
-    plan:           sub.plan_name,
-    renewed_until:  fmt(nextBill),
-    amount:         parseFloat(sub.amount),
-    currency:       sub.currency,
+    message:       'Subscription renewed successfully.',
+    plan:          sub.plan_name,
+    renewed_until: fmt(nextBill),
+    amount:        parseFloat(sub.amount),
+    currency:      sub.currency,
   };
 };
 
 // ============================================================
-// CRON JOB — Check renewals & send reminder emails
-// Call this daily via a cron job or Render scheduled job
-// POST /api/internal/cron/subscription-reminders
+// CRON — renewal reminders + expire past-due subscriptions
 // ============================================================
 const processRenewalReminders = async () => {
   const results = { reminders_sent: 0, expired: 0, errors: [] };
 
-  // Find subscriptions expiring in 10, 5, 1 days
   const [upcoming] = await db.query(
-    `SELECT s.*, t.name AS tenant_name, t.email AS tenant_email,
-             p.name AS plan_name, u.name AS admin_name, u.email AS admin_email
+    `SELECT s.*, t.name AS tenant_name, p.name AS plan_name,
+            u.name AS admin_name, u.email AS admin_email
      FROM subscriptions s
      JOIN tenants t ON t.id = s.tenant_id
      JOIN plans   p ON p.id = s.plan_id
      JOIN users   u ON u.tenant_id = s.tenant_id AND u.role = 'admin'
-     WHERE s.status = 'active'
-       AND s.next_billing_at IS NOT NULL
+     WHERE s.status = 'active' AND s.next_billing_at IS NOT NULL
        AND s.next_billing_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 11 DAY)
      ORDER BY s.next_billing_at ASC`
   );
 
   for (const sub of upcoming) {
     const daysLeft = Math.ceil((new Date(sub.next_billing_at) - new Date()) / 86400000);
-
-    // Only send on exactly 10, 5, 1 days
     if (![10, 5, 1].includes(daysLeft)) continue;
-
     try {
       await sendRenewalReminderEmail({
-        to:             sub.admin_email,
-        name:           sub.admin_name,
-        companyName:    sub.tenant_name,
-        planName:       sub.plan_name,
-        nextBillingDate: sub.next_billing_at,
-        amount:         parseFloat(sub.amount),
-        currency:       sub.currency,
-        renewUrl:       `${APP_URL}/dashboard?tab=subscription`,
-        daysLeft,
+        to: sub.admin_email, name: sub.admin_name, companyName: sub.tenant_name,
+        planName: sub.plan_name, nextBillingDate: sub.next_billing_at,
+        amount: parseFloat(sub.amount), currency: sub.currency,
+        renewUrl: `${APP_URL}/subscription`, daysLeft,
       });
       results.reminders_sent++;
-    } catch (err) {
-      results.errors.push({ tenant: sub.tenant_name, error: err.message });
-    }
+    } catch (err) { results.errors.push({ tenant: sub.tenant_name, error: err.message }); }
   }
 
-  // Find expired subscriptions (next_billing_at passed, still 'active')
   const [expired] = await db.query(
     `SELECT s.*, t.name AS tenant_name, p.name AS plan_name,
-             u.name AS admin_name, u.email AS admin_email
+            u.name AS admin_name, u.email AS admin_email
      FROM subscriptions s
      JOIN tenants t ON t.id = s.tenant_id
      JOIN plans   p ON p.id = s.plan_id
      JOIN users   u ON u.tenant_id = s.tenant_id AND u.role = 'admin'
-     WHERE s.status = 'active'
-       AND s.next_billing_at < DATE_SUB(NOW(), INTERVAL 1 DAY)`
+     WHERE s.status = 'active' AND s.next_billing_at < DATE_SUB(NOW(), INTERVAL 1 DAY)`
   );
 
   for (const sub of expired) {
     try {
-      // Mark subscription as past_due
-      await db.query(
-        `UPDATE subscriptions SET status = 'past_due' WHERE id = ?`,
-        [sub.id]
-      );
-      // Suspend tenant
-      await db.query(
-        `UPDATE tenants SET status = 'suspended' WHERE id = ?`,
-        [sub.tenant_id]
-      );
-
+      await db.query(`UPDATE subscriptions SET status = 'past_due' WHERE id = ?`, [sub.id]);
+      await db.query(`UPDATE tenants SET status = 'suspended' WHERE id = ?`, [sub.tenant_id]);
       await sendSubscriptionExpiredEmail({
-        to:          sub.admin_email,
-        name:        sub.admin_name,
-        companyName: sub.tenant_name,
-        planName:    sub.plan_name,
-        renewUrl:    `${APP_URL}/dashboard?tab=subscription`,
+        to: sub.admin_email, name: sub.admin_name,
+        companyName: sub.tenant_name, planName: sub.plan_name,
+        renewUrl: `${APP_URL}/subscription`,
       });
       results.expired++;
-    } catch (err) {
-      results.errors.push({ tenant: sub.tenant_name, error: err.message });
-    }
+    } catch (err) { results.errors.push({ tenant: sub.tenant_name, error: err.message }); }
   }
 
   return results;
@@ -392,7 +555,8 @@ const processRenewalReminders = async () => {
 module.exports = {
   getMySubscription,
   previewPlanChange,
-  changePlan,
+  initiatePlanChange,
+  completePlanChange,
   renewSubscription,
   processRenewalReminders,
   getCurrentSubscription,

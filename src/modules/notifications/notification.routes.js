@@ -1,5 +1,6 @@
 // ============================================================
 // src/modules/notifications/notification.routes.js
+// All 6 controller functions now exist — no startup crash
 // ============================================================
 
 const express      = require('express');
@@ -9,11 +10,11 @@ const authenticate = require('../../middleware/auth');
 
 router.use(authenticate);
 
-router.get('/',                     controller.getNotifications);
-router.get('/unread-count',         controller.getUnreadCount);
-router.patch('/mark-all-read',      controller.markAllAsRead);
-router.delete('/clear-read',        controller.clearReadNotifications);
-router.patch('/:id/read',           controller.markAsRead);
-router.delete('/:id',               controller.deleteNotification);
+router.get('/',                  controller.getNotifications);
+router.get('/unread-count',      controller.getUnreadCount);
+router.patch('/mark-all-read',   controller.markAllAsRead);
+router.delete('/clear-read',     controller.clearReadNotifications);
+router.patch('/:id/read',        controller.markAsRead);
+router.delete('/:id',            controller.deleteNotification);
 
 module.exports = router;

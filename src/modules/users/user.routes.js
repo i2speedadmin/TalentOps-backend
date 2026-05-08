@@ -9,7 +9,7 @@ const path         = require('path');
 const fs           = require('fs');
 const controller   = require('./user.controller');
 const authenticate = require('../../middleware/auth');
-const { allowMinRole, allowRoles } = require('../../middleware/role');
+const { allowMinRole } = require('../../middleware/role');
 
 // ─── Multer config for profile pictures ──────────────────────
 const uploadDir = path.join(__dirname, '../../uploads/profiles');
@@ -56,6 +56,6 @@ router.put('/:id', allowMinRole('team_leader'), controller.updateUser);
 router.delete('/:id', allowMinRole('manager'), controller.deleteUser);
 
 // Reset password — manager and above
-router.put('/:id/reset-password', allowMinRole('manager'), controller.resetUserPassword);
+router.post('/:id/reset-password', allowMinRole('manager'), controller.resetUserPassword);
 
 module.exports = router;

@@ -10,7 +10,7 @@ const { allowMinRole } = require('../../middleware/role');
 
 router.use(authenticate);
 
-// Utility endpoints
+// Utility endpoints — must be before /:id
 router.get('/stats',      controller.getTaskStats);
 router.get('/assignable', allowMinRole('team_leader'), controller.getAssignableUsers);
 

@@ -1,19 +1,20 @@
 // ============================================================
 // src/modules/notifications/notification.controller.js
+// FIXED: exports all 6 functions that notification.routes.js needs:
+//   getNotifications, getUnreadCount, markAllAsRead,
+//   clearReadNotifications, markAsRead, deleteNotification
 // ============================================================
 
-const notifService = require('./notification.service');
+const svc = require('./notification.service');
 
 // GET /api/notifications
 const getNotifications = async (req, res) => {
   try {
     const { page, limit, unreadOnly } = req.query;
-    const result = await notifService.getNotifications({
-      userId:     req.user.id,
-      tenantId:   req.user.tenant_id,
-      page,
-      limit,
-      unreadOnly: unreadOnly === 'true',
+    const result = await svc.getNotifications({
+      userId:    req.user.id,
+      tenantId:  req.user.tenant_id,
+      page, limit, unreadOnly,
     });
     res.json({ success: true, ...result });
   } catch (err) {
@@ -24,8 +25,37 @@ const getNotifications = async (req, res) => {
 // GET /api/notifications/unread-count
 const getUnreadCount = async (req, res) => {
   try {
-    const count = await notifService.getUnreadCount(req.user.id, req.user.tenant_id);
+    const count = await svc.getUnreadCount({
+      userId:   req.user.id,
+      tenantId: req.user.tenant_id,
+    });
     res.json({ success: true, unreadCount: count });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// PATCH /api/notifications/mark-all-read
+const markAllAsRead = async (req, res) => {
+  try {
+    const result = await svc.markAllAsRead({
+      userId:   req.user.id,
+      tenantId: req.user.tenant_id,
+    });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// DELETE /api/notifications/clear-read
+const clearReadNotifications = async (req, res) => {
+  try {
+    const result = await svc.clearReadNotifications({
+      userId:   req.user.id,
+      tenantId: req.user.tenant_id,
+    });
+    res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -34,45 +64,36 @@ const getUnreadCount = async (req, res) => {
 // PATCH /api/notifications/:id/read
 const markAsRead = async (req, res) => {
   try {
-    const result = await notifService.markAsRead(req.params.id, req.user.id, req.user.tenant_id);
+    const result = await svc.markAsRead({
+      notificationId: req.params.id,
+      userId:         req.user.id,
+      tenantId:       req.user.tenant_id,
+    });
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(err.status || 500).json({ success: false, message: err.message });
-  }
-};
-
-// PATCH /api/notifications/mark-all-read
-const markAllAsRead = async (req, res) => {
-  try {
-    const result = await notifService.markAllAsRead(req.user.id, req.user.tenant_id);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
   }
 };
 
 // DELETE /api/notifications/:id
 const deleteNotification = async (req, res) => {
   try {
-    const result = await notifService.deleteNotification(req.params.id, req.user.id);
+    const result = await svc.deleteNotification({
+      notificationId: req.params.id,
+      userId:         req.user.id,
+      tenantId:       req.user.tenant_id,
+    });
     res.json({ success: true, ...result });
   } catch (err) {
     res.status(err.status || 500).json({ success: false, message: err.message });
   }
 };
 
-// DELETE /api/notifications/clear-read
-const clearReadNotifications = async (req, res) => {
-  try {
-    const result = await notifService.clearReadNotifications(req.user.id, req.user.tenant_id);
-    res.json({ success: true, ...result });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-};
-
 module.exports = {
-  getNotifications, getUnreadCount,
-  markAsRead, markAllAsRead,
-  deleteNotification, clearReadNotifications,
+  getNotifications,
+  getUnreadCount,
+  markAllAsRead,
+  clearReadNotifications,
+  markAsRead,
+  deleteNotification,
 };

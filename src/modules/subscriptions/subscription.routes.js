@@ -6,12 +6,12 @@ const router       = express.Router();
 const controller   = require('./subscription.controller');
 const authenticate = require('../../middleware/auth');
 
-// All subscription routes require auth
 router.use(authenticate);
 
-router.get('/me',            controller.getMySubscription);
-router.post('/preview-change', controller.previewChange);
-router.post('/change-plan',  controller.changePlan);
-router.post('/renew',        controller.renewSubscription);
+router.get('/me',                controller.getMySubscription);
+router.post('/preview-change',   controller.previewChange);
+router.post('/initiate-change',  controller.initiateChange);   // Step 1: create payment order
+router.post('/complete-change',  controller.completeChange);   // Step 2: verify payment + apply
+router.post('/renew',            controller.renewSubscription);
 
 module.exports = router;
