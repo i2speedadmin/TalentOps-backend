@@ -53,6 +53,17 @@ app.get('/api/health', (req, res) => {
     },
   });
 });
+// ── /healthz — for UptimeRobot / external monitors ───────────────────────
+// Returns plain text 200 OK so UptimeRobot can detect uptime easily.
+// No auth required. Keep this as lightweight as possible.
+app.get('/healthz', async (req, res) => {
+    try {
+        await sequelize.query('SELECT 1');     // verify DB is alive
+        res.status(200).send('TalentOps is Up');            // UptimeRobot expects 200
+    } catch (err) {
+        res.status(503).send('DB_UNAVAILABLE');
+    }
+});
 
 // ─── PUBLIC Routes ────────────────────────────────────────────
 // Signup + payment flow (no auth required)
